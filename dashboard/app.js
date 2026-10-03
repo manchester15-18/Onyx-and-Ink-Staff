@@ -1,31 +1,160 @@
-if(document.getElementById('loginForm')){document.getElementById('loginForm').onsubmit=async event=>{event.preventDefault();const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('loginPassword').value})});const data=await r.json();if(r.ok)location.reload();else document.getElementById('loginNotice').textContent=data.error;};}else{
-let chatLoaded=false,chatLoading=false;let state=null,filter='all',currentPage='',inboxLoaded=false,inboxLoading=false;const $=id=>document.getElementById(id);const node=(tag,text,cls)=>{const n=document.createElement(tag);n.textContent=text;if(cls)n.className=cls;return n};
-function detail(title,meta,body){$('detailTitle').textContent=title;$('detailMeta').textContent=meta;$('detailBody').textContent=body;$('detail').showModal()}
-function render(){if(!state)return;$('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[state.mode]||state.mode;$('modeNote').textContent=state.mode==='send'?'Messages can be sent automatically':'No live sending';$('monitor').textContent=state.monitor?'Running':'Stopped';$('monitorNote').textContent=state.monitor?(state.enabled?'Background monitoring enabled':'Monitor running'):'Start when you’re ready';$('google').textContent=state.authorized?'Authorized':'Setup needed';$('modeSelect').value=state.mode;$('saveMode').disabled=state.monitor;$('start').disabled=state.monitor;$('stop').disabled=!state.managed;$('agents').replaceChildren(...state.agents.map(a=>{const x=node('article','','agent');x.append(node('div',a.name[0],'avatar'),node('h3',a.name),node('p',a.role),node('small',a.email));return x}));$('rows').replaceChildren(...state.activity.filter(a=>filter==='all'||a.status===filter||a.receipt?.state===filter||filter==='delivery-unconfirmed'&&a.receipt?.state==='failure-notice').map(a=>{const row=node('tr','');const date=node('td',new Date(a.time).toLocaleString());const who=node('td',a.sender);who.append(node('small',a.to));const message=node('td','');const btn=node('button',a.subject||'(No subject)');btn.onclick=()=>detail(a.subject,`${a.sender} → ${a.to} · ${a.status}${a.receipt?' · '+a.receipt.label+' · Checked '+new Date(a.receipt.checked).toLocaleString():''}${a.diagnostic?' · '+a.diagnostic:''}`,a.body);message.append(btn,node('small',a.kind));const status=node('td','');status.append(node('span',({'accepted':'Google accepted','delivery-unconfirmed':'Unconfirmed','partially-accepted':'Some recipients refused','draft':'Draft'})[a.status]||a.status,'badge '+a.status));if(a.receipt){status.append(node('small',a.receipt.label));status.append(node('small','Checked '+new Date(a.receipt.checked).toLocaleString()))}else if(a.status!=='draft')status.append(node('small','Confirmation not checked'));row.append(date,who,message,status);return row}));if(!$('rows').children.length){const row=node('tr','');const cell=node('td','No messages in this view yet.');cell.colSpan=4;row.append(cell);$('rows').append(row)}$('reportList').replaceChildren(...state.reports.filter(r=>$('reportAgent').value==='all'||r.agent===$('reportAgent').value).map(r=>{const btn=node('button',(r.agent||'Unassigned')+' · '+r.name,'reportButton');btn.onclick=()=>detail(r.name,'Saved staff report',r.body);return btn}));if(!state.reports.some(r=>$('reportAgent').value==='all'||r.agent===$('reportAgent').value))$('reportList').append(node('p','No saved reports for this selection yet.','muted'));$('wifiUrl').textContent=state.wifi?.enabled?state.wifi.url:'Wi-Fi access has not been enabled.';$('telegramStatus').textContent=state.telegram?.configured?(state.telegram.enabled?'Enabled':'Disabled')+' · '+state.telegram.paired+' paired accounts':'Token needed';if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=state.telegram?.enabled||false;$('connection').textContent='Connected locally';if($('mailboxSelect').options.length===1){$('mailboxSelect').replaceChildren(...state.mailboxes.map(m=>{const option=node('option',m.label+(m.email?' — '+m.email:''));option.value=m.name;return option}));const chosen=new URLSearchParams(location.search).get('mailbox');if(state.mailboxes.some(m=>m.name===chosen))$('mailboxSelect').value=chosen;}showPage()}
-async function refresh(){try{const r=await fetch('/api/status');if(!r.ok)throw Error();state=await r.json();render()}catch{$('connection').textContent='Dashboard offline'}}
-async function action(path,data={}){try{const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Dashboard-Token':state.token},body:JSON.stringify(data)});const result=await r.json();$('notice').textContent=result.error||'Settings updated. Monitor status refreshes automatically.';await refresh()}catch{$('notice').textContent='Could not reach the local dashboard.'}}
-$('saveMode').onclick=()=>{const mode=$('modeSelect').value;if(mode==='send'&&!confirm('Enable live sending? The running monitor will send agent replies and forward outside emails to the CEO.'))return;action('mode',{mode})};$('start').onclick=()=>{if(state.mode==='send'&&!confirm('Start the monitor with live email sending enabled?'))return;action('start')};$('stop').onclick=()=>action('stop');$('close').onclick=()=>$('detail').close();document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('active',x===b));render()});refresh();setInterval(refresh,5000);
+(()=>{
+const $=id=>document.getElementById(id);
+const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n};
+const on=(id,ev,fn)=>$(id).addEventListener(ev,fn);
 
-let openedMail=null,replyRequestId=null;
-async function mailApi(path,data){const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Dashboard-Token':state.token},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error||'Could not complete the inbox request.');return result}
-async function loadInbox(force=true){if(!state||inboxLoading)return;inboxLoading=true;const mailbox=$('mailboxSelect').value;$('refreshInbox').disabled=true;$('inboxNotice').textContent='Loading your inbox…';try{const data=await mailApi('inbox',{refresh:force,mailbox});if(mailbox!==$('mailboxSelect').value)return;inboxLoaded=true;$('inboxList').replaceChildren(...data.messages.map(m=>{const btn=node('button',m.subject||'(No subject)','inboxItem'+(m.unread?' unread':''));btn.append(node('small',m.from+' · '+m.date));btn.onclick=()=>openMail(m.id);return btn}));if(!data.messages.length)$('inboxList').append(node('p','Your inbox is empty.','muted'));$('inboxNotice').textContent=''}catch(error){$('inboxNotice').textContent=error.message}finally{inboxLoading=false;$('refreshInbox').disabled=false}}
-async function openMail(id){$('inboxNotice').textContent='Opening message…';try{openedMail=await mailApi('message',{id});replyRequestId=crypto.randomUUID();$('replySender').value=['Owner','Morgan','Avery','Jordan','Cameron'].includes($('mailboxSelect').value)?$('mailboxSelect').value:'Owner';$('mailSubject').textContent=openedMail.subject||'(No subject)';$('mailMeta').textContent=openedMail.from+' → '+openedMail.to+' · '+openedMail.date;$('mailBody').textContent=openedMail.body;$('mailAttachments').textContent=openedMail.attachments.length?'Attachments: '+openedMail.attachments.join(', ')+' (open in Gmail to view)':'';$('replyTo').textContent='To: '+openedMail.replyTo+' · Your personal Gmail will be BCC’d.';$('replyBody').value='';$('replyNotice').textContent='';$('sendReply').disabled=false;$('sendReply').textContent=state.mode==='draft'?'Save reply draft':'Send reply';$('mailDetail').showModal();$('inboxNotice').textContent=''}catch(error){$('inboxNotice').textContent=error.message}}
-$('refreshInbox').onclick=()=>loadInbox(true);$('mailClose').onclick=()=>$('mailDetail').close();$('sendReply').onclick=async()=>{if(!openedMail||!$('replyBody').value.trim())return;$('sendReply').disabled=true;try{await refresh();if(state.mode==='off')throw Error('Email is off. Select Draft or Live first.');if(state.mode==='send'&&!confirm('Send this reply to '+openedMail.replyTo+' now? Your personal Gmail will be BCC’d.')){$('sendReply').disabled=false;return}const result=await mailApi('reply',{id:openedMail.id,body:$('replyBody').value,sender:$('replySender').value,requestId:replyRequestId});$('replyNotice').textContent=result.result;await refresh()}catch(error){$('replyNotice').textContent=error.message+' If delivery is uncertain, do not resubmit as a new reply.';$('sendReply').disabled=false}};
-
-const pages={chat:['Agent chat','Talk to Morgan, Avery, Jordan, or Cameron.'],overview:['Staff overview','Your team and business at a glance.'],inbox:['Inbox','Read and reply from the CEO or any agent’s mailbox.'],activity:['Delivery & activity','Follow sending attempts, recipient replies, and delivery issues.'],reports:['Staff reports','Department recommendations and decisions in one place.'],settings:['Settings','Control monitoring and choose draft or live sending.']};
-function showPage(){let page=location.pathname.split('/')[1]||location.hash.slice(1)||'overview';if(!pages[page])page='overview';document.querySelectorAll('[data-page]').forEach(section=>section.hidden=section.dataset.page!==page);document.querySelectorAll('nav a').forEach(link=>{const active=link.pathname==='/'+page;link.classList.toggle('current',active);if(active)link.setAttribute('aria-current','page');else link.removeAttribute('aria-current')});$('pageTitle').textContent=pages[page][0];$('pageSubtitle').textContent=pages[page][1];document.title=pages[page][0]+' • Onyx & Ink';if(page!==currentPage){currentPage=page;$('notice').textContent='';window.scrollTo(0,0)}if(page==='inbox'&&state&&!inboxLoaded&&!inboxLoading)loadInbox(false);if(page==='chat'&&state&&typeof chatLoaded!=='undefined'&&!chatLoaded&&!chatLoading)loadChat()}
-document.querySelectorAll('nav a').forEach(link=>link.onclick=event=>{if(event.metaKey||event.ctrlKey)return;event.preventDefault();history.pushState({},'',link.pathname==='/inbox'?'/inbox?mailbox='+encodeURIComponent($('mailboxSelect').value):link.pathname);showPage()});window.addEventListener('popstate',showPage);showPage();
-$('mailboxSelect').onchange=()=>{inboxLoaded=false;history.replaceState({},'','/inbox?mailbox='+encodeURIComponent($('mailboxSelect').value));$('inboxList').replaceChildren(node('p','Loading selected inbox…','muted'));loadInbox(false)};
-$('checkDelivery').onclick=async()=>{$('checkDelivery').disabled=true;$('notice').textContent='Checking Gmail for sending records, replies, and failure notices…';try{const result=await mailApi('delivery',{});$('notice').textContent=result.message;await refresh()}catch(error){$('notice').textContent=error.message}finally{$('checkDelivery').disabled=false}};
-
-$('reportAgent').onchange=render;
-let composeRequest=null;
-$('composeMail').onclick=()=>{composeRequest=crypto.randomUUID();$('composeSender').value=['Owner','Shared','Morgan','Avery','Jordan','Cameron'].includes($('mailboxSelect').value)?$('mailboxSelect').value:'Owner';$('composeTo').value='';$('composeSubject').value='';$('composeBody').value='';$('composeNotice').textContent='';$('sendCompose').disabled=false;$('sendCompose').textContent=state.mode==='draft'?'Save draft':'Send email';$('composeDetail').showModal()};$('composeClose').onclick=()=>$('composeDetail').close();
-$('sendCompose').onclick=async()=>{if(!$('composeTo').checkValidity()||!$('composeSubject').value.trim()||!$('composeBody').value.trim()){$('composeNotice').textContent='Enter a valid recipient, subject, and message.';return}if(state.mode==='send'&&!confirm('Send this new email to '+$('composeTo').value+'?'))return;$('sendCompose').disabled=true;try{const result=await mailApi('compose',{sender:$('composeSender').value,to:$('composeTo').value,subject:$('composeSubject').value,body:$('composeBody').value,requestId:composeRequest});$('composeNotice').textContent=result.result;await refresh()}catch(error){$('composeNotice').textContent=error.message+' If delivery is uncertain, do not recreate and resend the email.';$('sendCompose').disabled=false}};
-async function loadChat(){if(!state||chatLoading)return;chatLoading=true;const agent=$('chatAgent').value;try{const result=await mailApi('chat-history',{agent});if(agent!==$('chatAgent').value)return;chatLoaded=true;$('chatHistory').replaceChildren(...result.messages.map(m=>{const box=node('article','','chatBubble '+m.role);box.append(node('strong',m.role==='user'?'You':agent),node('small',m.source+' · '+new Date(m.created.replace(' ','T')+'Z').toLocaleString()),node('p',m.body));return box}));if(!result.messages.length)$('chatHistory').append(node('p','Start a conversation with '+agent+'.','muted'));$('chatNotice').textContent=''}catch(error){$('chatNotice').textContent=error.message}finally{chatLoading=false}}
-$('chatAgent').onchange=()=>{chatLoaded=false;loadChat()};$('refreshChat').onclick=loadChat;setInterval(()=>{if(currentPage==='chat'&&!$('sendChat').disabled)loadChat()},10000);
-$('chatForm').onsubmit=async event=>{event.preventDefault();const agent=$('chatAgent').value,body=$('chatBody').value.trim();if(!body)return;$('sendChat').disabled=true;$('chatAgent').disabled=true;$('chatNotice').textContent=agent+' is thinking…';try{await mailApi('chat',{agent,body,requestId:crypto.randomUUID()});$('chatBody').value='';await loadChat()}catch(error){$('chatNotice').textContent=error.message}finally{$('sendChat').disabled=false;$('chatAgent').disabled=false}};
-$('showWifiPassword').onclick=async()=>{try{const r=await mailApi('wifi-password',{});$('wifiPassword').textContent=r.password}catch(error){$('wifiPassword').textContent=error.message}};
-$('saveTelegram').onclick=async()=>{try{await mailApi('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';await refresh();$('notice').textContent='Telegram settings saved.'}catch(error){$('notice').textContent=error.message}};
-$('pairTelegram').onclick=async()=>{try{const r=await mailApi('telegram-pair',{});$('telegramPairCode').textContent='In your bot’s private Telegram chat, send /pair '+r.code+' within 10 minutes. This code grants access to the shared staff conversations.'}catch(error){$('telegramPairCode').textContent=error.message}};
+if($('loginForm')){
+  on('loginForm','submit',async e=>{e.preventDefault();
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('loginPassword').value})});
+    const d=await r.json();if(r.ok)location.reload();else $('loginNotice').textContent=d.error});
+  return;
 }
+
+const PAGES=['overview','inbox','activity','reports','settings'];
+let S=null,page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,filt='all',repFilter='all',repIdx=null,chatBusy=false;
+const LABEL={accepted:'Google accepted','delivery-unconfirmed':'Unconfirmed','partially-accepted':'Some refused',draft:'Draft'};
+
+async function api(path,data={}){
+  const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Dashboard-Token':S.token},body:JSON.stringify(data)});
+  const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed.');return j}
+function say(msg){$('notice').textContent=msg}
+function detail(t,m,b){$('detailTitle').textContent=t;$('detailMeta').textContent=m;$('detailBody').textContent=b;$('detail').showModal()}
+
+/* Agent status is derived from real data only: saved drafts, unconfirmed sends, monitor state. */
+function agentState(name){
+  const mine=S.activity.filter(a=>a.sender.startsWith(name));
+  const bad=mine.filter(a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted').length;
+  const drafts=mine.filter(a=>a.status==='draft').length;
+  if(bad)return['need',bad+' unconfirmed send'+(bad>1?'s':'')];
+  if(drafts)return['busy',drafts+' draft'+(drafts>1?'s':'')+' saved'];
+  return S.monitor?['live','Monitor running']:['off','Monitor stopped']}
+function attention(){
+  const items=[],bad=S.activity.filter(a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted'),drafts=S.activity.filter(a=>a.status==='draft');
+  if(!S.authorized)items.push(['need','Google sign-in needed','Run google_mail_auth.py on the Mac.','settings']);
+  if(S.enabled&&!S.monitor)items.push(['need','Monitor is not running','Background monitoring is enabled but the monitor is stopped.','settings']);
+  if(bad.length)items.push(['need',bad.length+' send'+(bad.length>1?'s':'')+' unconfirmed','Never resent automatically. Check delivery.','activity']);
+  if(drafts.length)items.push(['w',drafts.length+' draft'+(drafts.length>1?'s':'')+' to review','Saved locally; nothing was sent.','activity']);
+  return items}
+
+function pill(a,cls){return el('span','tg '+cls,a)}
+function render(){
+  $('connection').textContent='Connected locally';
+  $('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[S.mode]||S.mode;
+  $('modeNote').textContent=S.mode==='send'?'Messages can be sent automatically':'No live sending';
+  $('monitor').textContent=S.monitor?'Running':'Stopped';
+  $('monitorNote').textContent=S.monitor?(S.enabled?'Background monitoring enabled':'Monitor running'):'Start in Settings';
+  $('google').textContent=S.authorized?'Authorized':'Setup needed';
+  $('monitorLine').textContent=S.monitor?'Running':'Stopped';
+  if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
+  $('saveMode').disabled=S.monitor;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
+  const items=attention();
+  $('attnCount').textContent=items.length;
+  $('needs').replaceChildren(...(items.length?items.map(([lvl,t,d,go])=>{
+    const n=el('div','nd '+(lvl==='w'?'w':''));n.append(el('b','',t),el('small','',d));
+    const b=el('button','','Open');b.onclick=()=>navigate(go);n.append(b);return n}):[el('p','mut small','Nothing needs you right now.')]));
+  $('needBadge').hidden=!items.length;$('needBadge').textContent=items.length;
+  const bad=S.activity.filter(a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted').length;
+  $('actBadge').hidden=!bad;$('actBadge').textContent=bad;
+  const team=S.agents.map(a=>{const[st,txt]=agentState(a.name);
+    const b=el('button','ag'+(a.name===agent?' sel':''));const av=el('div','av',a.name[0]);av.append(el('i',st));
+    const t=el('div');t.append(el('b','',a.name+' · '+a.role),el('small','',txt));b.append(av,t);b.onclick=()=>pickAgent(a.name);return b});
+  $('team').replaceChildren(...team);
+  $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
+  $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',LABEL[a.status]||a.status));return r}));
+  renderRows();renderReports();
+  $('wifiUrl').textContent=S.wifi?.enabled?S.wifi.url:'Wi-Fi access has not been enabled.';
+  $('telegramStatus').textContent=S.telegram?.configured?(S.telegram.enabled?'Enabled':'Disabled')+' · '+S.telegram.paired+' paired':'Token needed';
+  if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=!!S.telegram?.enabled;
+  if($('mailboxSelect').options.length===1)$('mailboxSelect').replaceChildren(...S.mailboxes.map(m=>{const o=el('option','',m.label+(m.email?' — '+m.email:''));o.value=m.name;return o}));
+  showPage()}
+
+function renderRows(){
+  const list=S.activity.filter(a=>filt==='all'||a.status===filt||a.receipt?.state===filt||(filt==='delivery-unconfirmed'&&a.receipt?.state==='failure-notice'));
+  const rows=list.map(a=>{const r=el('tr');const who=el('td','',a.sender);who.append(el('small','',a.to));
+    const msg=el('td');const b=el('button','',a.subject||'(No subject)');
+    b.onclick=()=>detail(a.subject,a.sender+' → '+a.to+' · '+a.status+(a.receipt?' · '+a.receipt.label:'')+(a.diagnostic?' · '+a.diagnostic:''),a.body);msg.append(b,el('small','',a.kind));
+    const st=el('td');st.append(pill(LABEL[a.status]||a.status,a.status==='accepted'?'':a.status==='draft'?'d':'w'));
+    st.append(el('small','',a.receipt?a.receipt.label:(a.status==='draft'?'':'Confirmation not checked')));
+    r.append(el('td','',new Date(a.time).toLocaleString()),who,msg,st);return r});
+  if(!rows.length){const r=el('tr'),c=el('td','','No messages in this view yet.');c.colSpan=4;r.append(c);rows.push(r)}
+  $('rows').replaceChildren(...rows)}
+
+function renderReports(){
+  const names=['all',...new Set(S.agents.map(a=>a.name)),'Unassigned'];
+  $('reportFilters').replaceChildren(...names.map(n=>{const b=el('button',n===repFilter?'on':'',n==='all'?'All':n);b.onclick=()=>{repFilter=n;renderReports()};return b}));
+  const list=S.reports.map((r,i)=>[r,i]).filter(([r])=>repFilter==='all'||r.agent===repFilter);
+  $('reportList').replaceChildren(...(list.length?list.map(([r,i])=>{const b=el('button','m'+(i===repIdx?' on':''));b.append(el('b','',r.name),el('small','',r.agent));b.onclick=()=>{repIdx=i;renderReports()};return b}):[el('p','mut','No saved reports for this selection yet.')]));
+  $('reportBody').textContent=repIdx!==null&&S.reports[repIdx]?S.reports[repIdx].body:'Select a report.'}
+
+async function refresh(){try{const r=await fetch('/api/status');if(r.status===401){location.reload();return}if(!r.ok)throw 0;S=await r.json();render()}catch{$('connection').textContent='Dashboard offline'}}
+
+/* Navigation */
+function showPage(){let p=location.pathname.split('/')[1]||'overview';if(!PAGES.includes(p))p='overview';
+  document.querySelectorAll('[data-page]').forEach(s=>s.hidden=s.dataset.page!==p);
+  document.querySelectorAll('[data-nav]').forEach(a=>{const cur=a.dataset.nav===p;a.classList.toggle('current',cur);cur?a.setAttribute('aria-current','page'):a.removeAttribute('aria-current')});
+  if(p!==page){page=p;say('');document.title=p[0].toUpperCase()+p.slice(1)+' • Onyx & Ink'}
+  if(p==='inbox'&&S&&!inboxLoaded&&!inboxBusy)loadInbox(false)}
+function navigate(p){history.pushState({},'','/'+p);showPage()}
+document.querySelectorAll('[data-nav]').forEach(a=>a.addEventListener('click',e=>{if(e.metaKey||e.ctrlKey)return;e.preventDefault();navigate(a.dataset.nav)}));
+addEventListener('popstate',showPage);
+
+function pickAgent(n){agent=n;$('cw').textContent=n;$('draftWho').textContent=n;if(opened)$('replySender').value=n;render();loadChat()}
+
+/* Inbox */
+async function loadInbox(force){if(inboxBusy)return;inboxBusy=true;const mailbox=$('mailboxSelect').value;$('refreshInbox').disabled=true;$('inboxNotice').textContent='Loading inbox…';
+  try{const d=await api('inbox',{refresh:force,mailbox});if(mailbox!==$('mailboxSelect').value)return;inboxLoaded=true;
+    $('inboxList').replaceChildren(...(d.messages.length?d.messages.map(m=>{const b=el('button','m'+(m.unread?' unread':''));b.append(el('b','',m.subject||'(No subject)'),el('small','',m.from+' · '+m.date));b.onclick=()=>openMail(m.id);return b}):[el('p','mut','Your inbox is empty.')]));
+    const unread=d.messages.filter(m=>m.unread).length;$('unreadBadge').hidden=!unread;$('unreadBadge').textContent=unread;$('inboxNotice').textContent=''}
+  catch(e){$('inboxNotice').textContent=e.message}finally{inboxBusy=false;$('refreshInbox').disabled=false}}
+async function openMail(id){$('inboxNotice').textContent='Opening message…';
+  try{opened=await api('message',{id});replyId=crypto.randomUUID();
+    $('mailSubject').textContent=opened.subject||'(No subject)';$('mailMeta').textContent=opened.from+' → '+opened.to+' · '+opened.date;$('mailBody').textContent=opened.body;
+    $('mailAttachments').textContent=opened.attachments.length?'Attachments: '+opened.attachments.join(', ')+' (open in Gmail to view)':'';
+    $('replyTo').textContent='→ '+opened.replyTo+' · personal Gmail BCC’d';
+    const box=$('mailboxSelect').value;$('replySender').value=['Owner','Shared','Morgan','Avery','Jordan','Cameron'].includes(box)?box:(S.agents.some(a=>a.name===agent)?agent:'Owner');
+    $('replyBody').value='';$('replyNotice').textContent='';$('sendReply').disabled=false;$('sendReply').textContent=S.mode==='draft'?'Save reply draft':'Send reply';
+    $('reader').hidden=false;$('inboxNotice').textContent=''}catch(e){$('inboxNotice').textContent=e.message}}
+on('refreshInbox','click',()=>loadInbox(true));
+on('mailboxSelect','change',()=>{inboxLoaded=false;$('inboxList').replaceChildren(el('p','mut','Loading selected inbox…'));loadInbox(false)});
+on('sendReply','click',async()=>{if(!opened||!$('replyBody').value.trim())return;$('sendReply').disabled=true;
+  try{await refresh();if(S.mode==='off')throw Error('Email is off. Select Draft or Live in Settings.');
+    if(S.mode==='send'&&!confirm('Send this reply to '+opened.replyTo+' now? Your personal Gmail will be BCC’d.')){$('sendReply').disabled=false;return}
+    const r=await api('reply',{id:opened.id,body:$('replyBody').value,sender:$('replySender').value,requestId:replyId});$('replyNotice').textContent=r.result;await refresh()}
+  catch(e){$('replyNotice').textContent=e.message+' If delivery is uncertain, do not resubmit as a new reply.';$('sendReply').disabled=false}});
+on('askDraft','click',()=>{if(!opened)return;askAgent('Draft a reply to this email. Subject: '+opened.subject+'\n\n'+opened.body.slice(0,1500))});
+
+/* Compose */
+on('composeMail','click',()=>{composeId=crypto.randomUUID();const b=$('mailboxSelect').value;$('composeSender').value=['Owner','Shared','Morgan','Avery','Jordan','Cameron'].includes(b)?b:'Owner';
+  ['composeTo','composeSubject','composeBody'].forEach(i=>$(i).value='');$('composeNotice').textContent='';$('sendCompose').disabled=false;$('sendCompose').textContent=S.mode==='draft'?'Save draft':'Send email';$('composeDetail').showModal()});
+on('composeClose','click',()=>$('composeDetail').close());
+on('sendCompose','click',async()=>{if(!$('composeTo').checkValidity()||!$('composeSubject').value.trim()||!$('composeBody').value.trim()){$('composeNotice').textContent='Enter a valid recipient, subject, and message.';return}
+  if(S.mode==='send'&&!confirm('Send this new email to '+$('composeTo').value+'?'))return;$('sendCompose').disabled=true;
+  try{const r=await api('compose',{sender:$('composeSender').value,to:$('composeTo').value,subject:$('composeSubject').value,body:$('composeBody').value,requestId:composeId});$('composeNotice').textContent=r.result;await refresh()}
+  catch(e){$('composeNotice').textContent=e.message+' If delivery is uncertain, do not recreate and resend.';$('sendCompose').disabled=false}});
+
+/* Activity / settings */
+document.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{filt=b.dataset.filter;document.querySelectorAll('[data-filter]').forEach(x=>x.classList.toggle('on',x===b));renderRows()}));
+on('checkDelivery','click',async()=>{$('checkDelivery').disabled=true;say('Checking Gmail for sending records, replies, and failure notices…');
+  try{say((await api('delivery',{})).message);await refresh()}catch(e){say(e.message)}finally{$('checkDelivery').disabled=false}});
+const act=async(p,d)=>{try{const r=await api(p,d);say(r.error||'Settings updated.');await refresh()}catch(e){say(e.message)}};
+on('saveMode','click',()=>{const mode=$('modeSelect').value;if(mode==='send'&&!confirm('Enable live sending? The running monitor will send agent replies and forward outside emails to the CEO.'))return;act('mode',{mode})});
+on('start','click',()=>{if(S.mode==='send'&&!confirm('Start the monitor with live email sending enabled?'))return;act('start')});
+on('stop','click',()=>act('stop'));
+on('close','click',()=>$('detail').close());
+on('showWifiPassword','click',async()=>{try{$('wifiPassword').textContent=(await api('wifi-password',{})).password}catch(e){$('wifiPassword').textContent=e.message}});
+on('saveTelegram','click',async()=>{try{await api('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';await refresh();say('Telegram settings saved.')}catch(e){say(e.message)}});
+on('pairTelegram','click',async()=>{try{const r=await api('telegram-pair',{});$('telegramPairCode').textContent='In your bot’s private chat, send /pair '+r.code+' within 10 minutes. This grants access to the shared staff conversations.'}catch(e){$('telegramPairCode').textContent=e.message}});
+
+/* Chat (shared with Telegram through the same history table) */
+async function loadChat(){if(!S||chatBusy)return;const who=agent;
+  try{const r=await api('chat-history',{agent:who});if(who!==agent)return;
+    $('chatHistory').replaceChildren(...(r.messages.length?r.messages.map(m=>{const b=el('article','b '+m.role);b.append(el('p','',m.body),el('small','',(m.role==='user'?'You':who)+' · '+m.source+' · '+new Date(m.created.replace(' ','T')+'Z').toLocaleTimeString()));return b}):[el('p','mut small','Start a conversation with '+who+'.')]));
+    $('chatHistory').scrollTop=1e6;$('chatNotice').textContent=''}catch(e){$('chatNotice').textContent=e.message}}
+async function askAgent(text){const body=text.trim();if(!body||chatBusy)return;chatBusy=true;$('sendChat').disabled=true;$('chatNotice').textContent=agent+' is thinking…';
+  try{await api('chat',{agent,body:body.slice(0,4000),requestId:crypto.randomUUID()});$('chatBody').value=''}catch(e){$('chatNotice').textContent=e.message}
+  finally{chatBusy=false;$('sendChat').disabled=false;await loadChat()}}
+on('chatForm','submit',e=>{e.preventDefault();askAgent($('chatBody').value)});
+[['Summarize today','Summarize what needs my attention today based on our conversation.'],['What’s blocked?','What is blocked or waiting on my decision?']].forEach(([l,t])=>{const b=el('button','',l);b.type='button';b.onclick=()=>askAgent(t);$('chips').append(b)});
+
+refresh().then(()=>{$('cw').textContent=agent;loadChat()});setInterval(refresh,5000);setInterval(()=>{if(!chatBusy)loadChat()},10000);
+})();
