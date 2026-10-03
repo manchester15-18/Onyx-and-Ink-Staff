@@ -69,6 +69,33 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn('unconfirmed',result)
             self.assertEqual(len(list(mail.outbox.glob('*.eml'))),1)
 
+    def test_send_saved_transmits_draft_and_refuses_unconfirmed(self):
+        with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP') as smtp:
+            client=MagicMock(); client.send_message.return_value={}
+            smtp.return_value=client; client.__enter__.return_value=client
+            creds={name:('account@example.com','local-test-password') for name in STAFF}
+            draft=StaffMail(directory,'draft',{**ADDRESSES,'Shared':'shared@example.com'},bcc='private@example.com')
+            draft.deliver('Avery',['Owner'],'Hello','Saved draft',kind='compose',reply_address='customer@example.com')
+            path=next(draft.outbox.glob('*.eml'))
+            live=StaffMail(directory,'send',{**ADDRESSES,'Shared':'shared@example.com'},'smtp.example.com',587,'starttls',creds,bcc='private@example.com')
+            result=live.send_saved(path)
+            self.assertIn('accepted',result)
+            client.send_message.assert_called_once()
+            self.assertEqual(path.with_suffix('.status').read_text().strip(),'accepted')
+            self.assertIn('not a draft',live.send_saved(path))
+            self.assertEqual(client.send_message.call_count,1)
+
+    def test_concurrent_approval_cannot_submit_twice(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as directory:
+            mail=StaffMail(directory,'draft',ADDRESSES)
+            mail.deliver('Avery',['Owner'],'Hello','Draft')
+            path=next(mail.outbox.glob('*.eml'))
+            with path.with_suffix('.send-lock').open('a') as lock,patch.object(mail,'_submit') as submit:
+                fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                self.assertIn('already being submitted',mail.send_saved(path))
+                submit.assert_not_called()
+
     def test_bad_configuration_and_off_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError): StaffMail(directory,'send',ADDRESSES)

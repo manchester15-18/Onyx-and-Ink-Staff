@@ -48,6 +48,7 @@ class GroqLLM(OpenAICompletion):
     """Use the installed native client, without LiteLLM or Gemini dependencies."""
 
     def __init__(self, api_key, model="openai/gpt-oss-120b", rpm=25, tpm=7000, max_tokens=1500):
+        model = model.removeprefix("groq/")
         self.budget = RequestBudget(rpm, tpm)
         http_client = httpx.Client(event_hooks={"request": [self.budget.before_request]})
         super().__init__(
@@ -62,6 +63,21 @@ class GroqLLM(OpenAICompletion):
         )
 
     def _prepare_completion_params(self, messages, tools=None):
+        # Preserve tool-call IDs and other CrewAI fields while normalizing text blocks.
+        normalized = []
+        for message in messages:
+            item = dict(message)
+            content = item.get("content")
+            if isinstance(content, list):
+                if any(not isinstance(block, dict) or block.get("type", "text") != "text" or not isinstance(block.get("text", ""), str) for block in content):
+                    raise ValueError("This Groq model supports text content only.")
+                item["content"] = "\n".join(block.get("text", "") for block in content)
+            elif isinstance(content, dict):
+                if not isinstance(content.get("text"), str):
+                    raise ValueError("This Groq model supports text content only.")
+                item["content"] = content["text"]
+            normalized.append(item)
+        messages = normalized
         params = super()._prepare_completion_params(messages, tools)
         # GPT-OSS uses its own completion boundaries; omit stop/prefill parameters.
         params.pop("stop", None)

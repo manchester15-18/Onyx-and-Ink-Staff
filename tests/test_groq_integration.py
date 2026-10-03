@@ -20,6 +20,20 @@ from staff_email import StaffMail, STAFF
 
 
 class GroqTests(unittest.TestCase):
+    def test_content_blocks_model_prefix_and_tool_metadata(self):
+        llm=GroqLLM('offline-test-key',model='groq/openai/gpt-oss-120b')
+        try:
+            payload=llm._prepare_completion_params([
+                {'role':'user','content':[{'text':'First'},{'type':'text','text':'Second'}]},
+                {'role':'tool','content':{'text':'Result'},'tool_call_id':'call_123'},
+            ])
+            self.assertEqual(payload['model'],'openai/gpt-oss-120b')
+            self.assertEqual(payload['messages'][0]['content'],'First\nSecond')
+            self.assertEqual(payload['messages'][1]['tool_call_id'],'call_123')
+            self.assertEqual(payload['messages'][1]['content'],'Result')
+            with self.assertRaises(ValueError):llm._prepare_completion_params([{'role':'user','content':[{'type':'image_url','image_url':{}}]}])
+        finally:llm.close()
+
     def test_key_errors_do_not_echo_secret(self):
         with patch.dict(os.environ, {'GROQ_API_KEY': 'secret\u201ckey'}):
             with self.assertRaises(ValueError) as error:

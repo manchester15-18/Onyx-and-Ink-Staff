@@ -4,8 +4,11 @@ import re
 import smtplib
 import ssl
 import uuid
+import fcntl
+from email import policy
 from email.message import EmailMessage
-from email.utils import formataddr, formatdate, make_msgid
+from email.parser import BytesParser
+from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 from pathlib import Path
 
 STAFF = ('Morgan', 'Avery', 'Jordan', 'Cameron')
@@ -56,7 +59,7 @@ class StaffMail:
                     raise ValueError(f'Configure SMTP credentials for {name}; never paste passwords into chat.')
 
     @classmethod
-    def from_env(cls, project_dir):
+    def from_env(cls, project_dir, mode=None):
         addresses = {name: os.getenv(f'{name.upper()}_EMAIL', '') for name in (*STAFF, 'Owner')}
         addresses['Shared'] = os.getenv('GOOGLE_MAIL_USER') or os.getenv('SMTP_USER', '')
         credentials = {name: (
@@ -74,7 +77,7 @@ class StaffMail:
         if method == 'oauth':
             from google_mail_auth import GoogleMailAuth
             oauth = GoogleMailAuth(project_dir, os.getenv('GOOGLE_MAIL_USER', ''))
-        return cls(project_dir, os.getenv('STAFF_EMAIL_MODE', 'off').lower(), addresses,
+        return cls(project_dir, (mode or os.getenv('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
                    os.getenv('SMTP_HOST', ''), port, os.getenv('SMTP_SECURITY', 'starttls'), credentials,
                    team_updates=os.getenv('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
                    bcc=os.getenv('OWNER_BCC_EMAIL', ''), oauth=oauth)
@@ -130,6 +133,50 @@ class StaffMail:
         path.write_bytes(message.as_bytes())
         if self.mode == 'draft':
             return f'Email drafted locally: {path.name}. Nothing sent.'
+        envelope = list(dict.fromkeys(([reply_address] if reply_address else [self.addresses[n] for n in recipients]) + ([self.bcc] if self.bcc else [])))
+        return self._submit(message, path, sender, envelope)
+
+    def send_saved(self, path):
+        path = Path(path)
+        # One reservation across dashboard processes or concurrent approval requests.
+        with path.with_suffix('.send-lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return 'This draft is already being submitted. Do not resend.'
+            return self._send_saved_locked(path)
+
+    def _send_saved_locked(self, path):
+        status = path.with_suffix('.status')
+        current = status.read_text().strip() if status.exists() else 'draft'
+        if current != 'draft':
+            return 'This message is not a draft. Unconfirmed mail is never resent automatically.'
+        if self.mode == 'off':
+            return 'Staff email is disabled.'
+        message = BytesParser(policy=policy.default).parsebytes(path.read_bytes())
+        _, from_addr = parseaddr(str(message.get('From', '')))
+        sender = next((name for name, addr in self.addresses.items() if addr and addr.lower() == from_addr.lower()), None)
+        if sender is None:
+            raise ValueError('Unknown staff sender.')
+        envelope = [addr for _, addr in getaddresses(message.get_all('To', []) + message.get_all('Cc', []) + message.get_all('Bcc', []))]
+        if any(not valid_address(addr) for addr in envelope):
+            raise ValueError('Message has an invalid recipient.')
+        envelope = list(dict.fromkeys(envelope))
+        if not envelope:
+            raise ValueError('Message has no valid recipients.')
+        if self.bcc and self.bcc not in envelope:
+            envelope.append(self.bcc)
+        try:
+            fd = os.open(status, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if status.read_text().strip() != 'draft':
+                return 'This message is not a draft. Unconfirmed mail is never resent automatically.'
+            fd = os.open(status, os.O_WRONLY | os.O_TRUNC)
+        os.write(fd, b'sending\n')
+        os.close(fd)
+        return self._submit(message, path, sender, envelope)
+
+    def _submit(self, message, path, sender, envelope):
         user, password = self.credentials.get(sender, ('', ''))
         stage = "connection"
         try:
@@ -149,8 +196,7 @@ class StaffMail:
                 else:
                     client.login(user, password)
                 stage = "message submission"
-                refused = client.send_message(message, from_addr=self.addresses[sender],
-                                              to_addrs=list(dict.fromkeys(([reply_address] if reply_address else [self.addresses[n] for n in recipients]) + ([self.bcc] if self.bcc else []))))
+                refused = client.send_message(message, from_addr=self.addresses[sender], to_addrs=envelope)
             status = 'partially-accepted' if refused else 'accepted'
             path.with_suffix('.status').write_text(status + '\n')
             return f'Email {status} by mail server; inbox delivery is not verified.'

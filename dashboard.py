@@ -1,5 +1,6 @@
 """Local staff dashboard. Bound to loopback; never exposes credentials."""
 import json
+from contextlib import closing
 import os
 from pathlib import Path
 import secrets
@@ -126,7 +127,7 @@ def snapshot():
     db=ROOT/'work'/'inbox-monitor.sqlite3'
     if db.exists():
         try:
-            with sqlite3.connect(f'file:{db}?mode=ro',uri=True) as connection:
+            with closing(sqlite3.connect(f'file:{db}?mode=ro',uri=True)) as connection:
                 processed=[{'uid':r[0],'status':r[1]} for r in connection.execute('SELECT uid,state FROM processed ORDER BY rowid DESC LIMIT 10')]
         except sqlite3.Error: pass
     reports=[]
@@ -136,6 +137,26 @@ def snapshot():
     return {'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
+
+
+def outbox_file(identifier):
+    path=(ROOT/str(identifier)).resolve()
+    root=(ROOT/'work'/'email-outbox').resolve()
+    if not path.is_relative_to(root) or path.suffix!='.eml' or not path.is_file():
+        raise ValueError()
+    return path
+
+
+def mail_from_config(config, mode=None):
+    env=dict(os.environ)
+    try:
+        for key,value in config.items():
+            if value is not None:os.environ[key]=value
+        return StaffMail.from_env(ROOT, mode=mode)
+    finally:
+        for key in config:
+            if key in env:os.environ[key]=env[key]
+            else:os.environ.pop(key,None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -149,17 +170,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
         self.end_headers();self.wfile.write(body)
     def do_GET(self):
+        path=urlparse(self.path).path
         if not self.allowed():return self.reply(403,{'error':'Local access only.'})
-        if self.path=='/app.js' or self.path=='/style.css':pass
-        elif self.path=='/ca.crt':
+        if path=='/app.js' or path=='/style.css':pass
+        elif path=='/ca.crt':
             return self.reply(200,(ROOT/'work'/'certificates'/'onyx-dashboard-ca.crt').read_bytes(),'application/x-x509-ca-cert')
         elif not ACCESS.authenticated(self):
-            if self.path.startswith('/api/'):return self.reply(401,{'error':'Sign in to the dashboard.'})
+            if path.startswith('/api/'):return self.reply(401,{'error':'Sign in to the dashboard.'})
             return self.reply(200,(ROOT/'dashboard'/'login.html').read_bytes(),'text/html; charset=utf-8')
-        if self.path=='/api/status':return self.reply(200,snapshot())
+        if path=='/api/status':return self.reply(200,snapshot())
         names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/app.js':'app.js','/style.css':'style.css'}
-        if self.path not in names:return self.reply(404,{'error':'Not found.'})
-        name=names[self.path];kind={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
+        if path not in names:return self.reply(404,{'error':'Not found.'})
+        name=names[path];kind={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
         self.reply(200,(ROOT/'dashboard'/name).read_bytes(),kind)
     def do_POST(self):
         global MONITOR
@@ -230,15 +252,7 @@ class Handler(BaseHTTPRequestHandler):
                         previous=db.execute('SELECT status FROM replies WHERE id=?',(request_id,)).fetchone()
                         if previous:return self.reply(200,{'result':previous[0]})
                         db.execute('INSERT INTO replies VALUES (?,?)',(request_id,'Submission reserved; delivery may be unconfirmed. Do not retry automatically.'));db.commit()
-                        env=dict(os.environ)
-                        try:
-                            for key,value in config.items():
-                                if value is not None:os.environ[key]=value
-                            mail=StaffMail.from_env(ROOT)
-                        finally:
-                            for key in config:
-                                if key in env:os.environ[key]=env[key]
-                                else:os.environ.pop(key,None)
+                        mail=mail_from_config(config)
                         subject=original['subject'].replace('\r',' ').replace('\n',' ')[:190]
                         if not composing and not subject.lower().startswith('re:'):subject='Re: '+subject
                         result=mail.deliver(sender,['Owner'],subject,body,kind='compose' if composing else 'manual',reply_address=original['replyTo'],
@@ -246,6 +260,23 @@ class Handler(BaseHTTPRequestHandler):
                         db.execute('UPDATE replies SET status=? WHERE id=?',(result,request_id));db.commit()
                         return self.reply(200,{'result':result})
                     finally:db.close()
+                elif self.path=='/api/approve':
+                    path=outbox_file(str(data.get('id','')))
+                    current=path.with_suffix('.status').read_text().strip() if path.with_suffix('.status').exists() else 'draft'
+                    if current!='draft':return self.reply(409,{'error':'This message is not waiting for approval. Unconfirmed mail is never resent automatically.'})
+                    config=dotenv_values(ROOT/'.env')
+                    if config.get('STAFF_EMAIL_MODE')=='off':return self.reply(409,{'error':'Email is off. Select Draft or Live.'})
+                    result=mail_from_config(config, mode='send').send_saved(path)
+                    return self.reply(200,{'result':result})
+                elif self.path=='/api/dismiss':
+                    ids=data.get('ids')
+                    if not isinstance(ids,list) or not ids or len(ids)>60:raise ValueError()
+                    for identifier in ids:
+                        path=outbox_file(str(identifier))
+                        current=path.with_suffix('.status').read_text().strip() if path.with_suffix('.status').exists() else 'draft'
+                        if current in ('draft','delivery-unconfirmed','partially-accepted'):
+                            path.with_suffix('.status').write_text('dismissed\n')
+                    return self.reply(200,{'ok':True})
                 else:return self.reply(404,{'error':'Not found.'})
             self.reply(200,{'ok':True})
         except (ValueError,json.JSONDecodeError):self.reply(400,{'error':'Invalid request or missing mail configuration.'})

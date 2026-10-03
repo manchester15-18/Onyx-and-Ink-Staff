@@ -10,6 +10,7 @@ os.environ["CREWAI_TELEMETRY_DISABLED"] = "true"
 os.environ["CREWAI_TRACING_ENABLED"] = "false"
 os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 
+
 from dotenv import load_dotenv
 from crewai import Agent, Crew, Process, Task
 from crewai.tools import tool
@@ -122,7 +123,11 @@ def main(argv=None):
         mail = StaffMail.from_env(PROJECT_DIR)
         key = credential("GROQ_API_KEY")
         search_key = credential("SERPER_API_KEY", required=False)
-        llm = GroqLLM(key, model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"), rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 7000), max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1500))
+        llm = GroqLLM(
+            key, model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+            rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 7000),
+            max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1500),
+        )
         crew = build_crew(llm, search_key, args.verbose, mail)
         inputs = {"directive": args.directive, "report_dir": str(PROJECT_DIR / "reports")}
         if args.check:
