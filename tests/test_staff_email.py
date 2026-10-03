@@ -11,6 +11,15 @@ ADDRESSES={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
 
 
 class StaffMailTests(unittest.TestCase):
+    def test_environment_builds_official_agent_signature(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config={'STAFF_EMAIL_MODE':'draft','MORGAN_EMAIL':'coo@example.com','AVERY_EMAIL':'marketing@example.com','JORDAN_EMAIL':'it@example.com','CAMERON_EMAIL':'hr@example.com','OWNER_EMAIL':'ceo@example.com','OWNER_BCC_EMAIL':'ceo@example.com','BUSINESS_WEBSITE':'https://onyxandink.org'}
+            mail=StaffMail.from_env(directory,config=config);mail.deliver('Jordan',['Owner'],'Design update','The design is ready for review.')
+            msg=BytesParser(policy=policy.default).parsebytes(next(mail.outbox.glob('*.eml')).read_bytes())
+            body=msg.get_content()
+            self.assertIn('Jordan\nIT & Storefront Development Lead\nOnyx & Ink',body)
+            self.assertIn('it@example.com | https://onyxandink.org',body)
+
     def test_draft_has_identity_and_never_connects(self):
         with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP') as smtp:
             mail=StaffMail(directory,'draft',ADDRESSES)

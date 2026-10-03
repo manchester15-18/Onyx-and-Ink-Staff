@@ -12,6 +12,12 @@ from email.utils import formataddr, formatdate, getaddresses, make_msgid, parsea
 from pathlib import Path
 
 STAFF = ('Morgan', 'Avery', 'Jordan', 'Cameron')
+SIGNATURE_TITLES = {
+    'Morgan':'Chief Operating Officer',
+    'Avery':'Marketing Lead',
+    'Jordan':'IT & Storefront Development Lead',
+    'Cameron':'Legal & HR Lead',
+}
 
 
 def valid_address(value):
@@ -20,7 +26,8 @@ def valid_address(value):
 
 class StaffMail:
     def __init__(self, project_dir, mode='off', addresses=None, host='', port=587,
-                 security='starttls', credentials=None, limit=12, team_updates=True, bcc='', oauth=None):
+                 security='starttls', credentials=None, limit=12, team_updates=True, bcc='', oauth=None,
+                 signatures=None):
         if mode not in ('off', 'draft', 'send'):
             raise ValueError('STAFF_EMAIL_MODE must be off, draft, or send.')
         self.oauth = oauth
@@ -31,6 +38,7 @@ class StaffMail:
         self.limit, self.count = limit, 0
         self.team_updates = team_updates
         self.bcc = bcc
+        self.signatures = signatures or {}
         self.run_id = uuid.uuid4().hex
         self.outbox = Path(project_dir) / 'work' / 'email-outbox' / self.run_id
         self.completed = set()
@@ -78,10 +86,12 @@ class StaffMail:
         if method == 'oauth':
             from google_mail_auth import GoogleMailAuth
             oauth = GoogleMailAuth(project_dir, get('GOOGLE_MAIL_USER', ''))
+        website=(get('BUSINESS_WEBSITE') or 'https://onyxandink.org').strip().rstrip('/')
+        signatures={name:f'{name}\n{SIGNATURE_TITLES[name]}\nOnyx & Ink\n{addresses[name]} | {website}' for name in STAFF}
         return cls(project_dir, (mode or get('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
                    get('SMTP_HOST', ''), port, get('SMTP_SECURITY', 'starttls'), credentials,
                    team_updates=get('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
-                   bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth)
+                   bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth, signatures=signatures)
 
     def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None):
         if self.mode == 'off':
@@ -121,7 +131,7 @@ class StaffMail:
             message['In-Reply-To'] = in_reply_to
         if references:
             message['References'] = references
-        signature = ('CEO' if sender == 'Owner' else sender) + '\nOnyx and Ink'
+        signature = self.signatures.get(sender,('CEO' if sender == 'Owner' else 'Onyx & Ink Team') + '\nOnyx & Ink')
         if kind not in ('manual', 'compose'):
             signature += f'\nAutomated staff message | Run {self.run_id}'
         message.set_content(body[:30000] + '\n\n' + signature + '\n')

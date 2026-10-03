@@ -64,3 +64,18 @@
 - Updated workspace_tools.py (`workspace_tools.py`).
 
 <!-- backup 1e89c7acfa890e335a4503e8dc4cc30a07d277f57ecd9c234253a2c98b56ba59 -->
+
+## 2026-10-03 19:42 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
+- Updated tests/test_workspace_tools.py (`tests/test_workspace_tools.py`).
+- Updated workspace_tools.py (`workspace_tools.py`).
+
+<!-- backup c89a67a8f65f6817b26ab743552bfd5e1f120a8325949231c47babcc9fcde7af -->

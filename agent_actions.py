@@ -19,7 +19,7 @@ report {title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
 design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; workspace_files {};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
-search {query}; webpage {url}. Workspace creation/upload is automatic. Email ALWAYS creates a draft awaiting human approval in Outbox, including requests to send. Reports save locally; document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or direct sending.'''
+search {query}; webpage {url}. Workspace creation/upload is automatic. Email ALWAYS creates a draft awaiting human approval in Outbox, including requests to send. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save locally; document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or direct sending.'''
 
 class Actions:
     def __init__(self, root, agent, run_id, delete_ids=None):

@@ -11,9 +11,19 @@ from dotenv import dotenv_values
 
 SCOPES=['https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/calendar.events.owned']
 
-def allowed_account(account,expected):
-    account=(account or '').lower();expected=(expected or '').lower()
-    return bool(account and expected and (account==expected or account.rpartition('@')[2]==expected.rpartition('@')[2]))
+class WorkspaceSetupError(RuntimeError):pass
+
+def verified_account(response):
+    if not response.ok:
+        reasons=set()
+        try:reasons={item.get('reason','') for item in response.json().get('error',{}).get('errors',[])}
+        except (ValueError,AttributeError,TypeError):pass
+        if response.status_code==403 or reasons & {'accessNotConfigured','SERVICE_DISABLED'}:
+            raise WorkspaceSetupError('Google Drive could not verify the account. Enable the Google Drive API in the OAuth client project, then reconnect.')
+        raise WorkspaceSetupError('Google Drive account verification failed (HTTP '+str(response.status_code)+').')
+    account=response.json().get('user',{}).get('emailAddress','').lower()
+    if not account:raise WorkspaceSetupError('Google Drive did not return the selected account identity.')
+    return account
 
 def save_status(root,state,account='',message=''):
     path=Path(root)/'work'/'workspace-status.json';path.parent.mkdir(exist_ok=True)
@@ -109,16 +119,15 @@ def main():
         # Confirm the same Workspace identity without printing private profile data.
         with AuthorizedSession(creds) as session:
             response=session.get('https://www.googleapis.com/drive/v3/about',params={'fields':'user(emailAddress)'},timeout=30)
-            account=response.json().get('user',{}).get('emailAddress','').lower()
-            expected=cfg.get('GOOGLE_WORKSPACE_USER') or cfg.get('GOOGLE_MAIL_USER','')
-            expected=expected.lower()
-            # Google reports the primary Workspace account even when login_hint is an alias.
-            if not response.ok or not allowed_account(account,expected):raise ValueError()
+            # The account the human selected is authoritative. It may be a primary
+            # Google identity while inbox@ is only a mail alias.
+            account=verified_account(response)
         workspace.save(creds);save_status(root,'connected',account,'Authorization verified with Google Drive.')
         print('Workspace authorized. Mail authorization is unchanged.');return 0
     except Exception as error:
         if isinstance(error,TimeoutError):reason='Google sign-in timed out before approval completed.'
-        elif isinstance(error,ValueError):reason='Google returned an invalid authorization, or the selected account was outside the configured Workspace domain.'
+        elif isinstance(error,WorkspaceSetupError):reason=str(error)
+        elif isinstance(error,ValueError):reason='Google returned an invalid authorization response. Download a fresh Desktop OAuth client if this repeats.'
         elif isinstance(error,OSError):reason='The local Google sign-in callback could not start or complete.'
         elif isinstance(error,requests.RequestException):reason='Google Drive could not verify the authorized account. Check that the Drive API is enabled.'
         else:reason='Google authorization was not saved. Check the OAuth consent policy and enabled Workspace APIs.'
