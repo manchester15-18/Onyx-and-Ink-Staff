@@ -21,6 +21,7 @@ from dotenv import dotenv_values, set_key
 from dashboard_mail import Mailbox
 from staff_email import StaffMail
 from delivery_tracking import check_delivery
+from inbox_state import InboxState
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -141,7 +142,7 @@ def snapshot():
     for item in artifacts:
         if item['kind']=='report':
             reports.append({'name':item['name'],'agent':item['agent'],'body':clean(tools.file(item['file_id']).read_text()[:50000])})
-    return {'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':(ROOT/'work'/'google-workspace-token.json').exists(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true'},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
+    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':(ROOT/'work'/'google-workspace-token.json').exists(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true'},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
@@ -162,11 +163,12 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def allowed(self):
         return self.headers.get('Host') in ACCESS.hosts()
-    def reply(self,code,data,kind='application/json'):
+    def reply(self,code,data,kind='application/json',extra_headers=None):
         body=json.dumps(data).encode() if kind=='application/json' else data
         self.send_response(code);self.send_header('Content-Type',kind);self.send_header('Cache-Control','no-store')
         self.send_header('Content-Length',str(len(body)));self.send_header('X-Content-Type-Options','nosniff');self.send_header('X-Frame-Options','DENY')
         self.send_header('Content-Security-Policy',"default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+        for key,value in (extra_headers or {}).items():self.send_header(key,value)
         self.end_headers();self.wfile.write(body)
     def do_GET(self):
         path=urlparse(self.path).path
@@ -178,6 +180,12 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/'):return self.reply(401,{'error':'Sign in to the dashboard.'})
             return self.reply(200,(ROOT/'dashboard'/'login.html').read_bytes(),'text/html; charset=utf-8')
         if path=='/api/status':return self.reply(200,snapshot())
+        if path=='/api/attachment':
+            try:
+                args=parse_qs(urlparse(self.path).query);name,content=MAILBOX.attachment(args.get('id',[''])[0],args.get('part',[''])[0])
+                from urllib.parse import quote
+                return self.reply(200,content,'application/octet-stream',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe='')})
+            except (ValueError,RuntimeError):return self.reply(400,{'error':'Attachment unavailable.'})
         if path=='/api/artifact':
             try:
                 tools=Actions(ROOT,'Morgan','download')
@@ -206,7 +214,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403,{'error':'Local dashboard authorization required.'})
         try:
             length=int(self.headers.get('Content-Length','0'))
-            if length>40000 or length<0:raise ValueError()
+            maximum=14_100_000 if self.path=='/api/upload' else 40000
+            if length>maximum or length<0:raise ValueError()
             data=json.loads(self.rfile.read(length))
             if self.path=='/api/chat-history':return self.reply(200,{'messages':CHAT.history(data.get('agent','Morgan'))})
             if self.path=='/api/chat':
@@ -260,7 +269,18 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/stop':
                     stop_monitor()
                 elif self.path=='/api/inbox':
-                    return self.reply(200,{'messages':MAILBOX.list(refresh=bool(data.get('refresh')),mailbox=data.get('mailbox','all'))})
+                    return self.reply(200,MAILBOX.page(refresh=bool(data.get('refresh')),mailbox=data.get('mailbox','all'),page_token=data.get('pageToken'),view=data.get('view','visible')))
+                elif self.path=='/api/inbox-settings':
+                    InboxState(ROOT).configure(data.get('days'));return self.reply(200,{'ok':True})
+                elif self.path=='/api/hide-email':
+                    identifier=str(data.get('id',''));MAILBOX.read(identifier)
+                    InboxState(ROOT).hide(identifier,hide=data.get('hidden',True) is True)
+                    return self.reply(200,{'message':'Dashboard visibility updated. Gmail is unchanged.'})
+                elif self.path=='/api/delete-email':
+                    if data.get('confirm') is not True:raise ValueError()
+                    return self.reply(200,MAILBOX.trash(str(data.get('id',''))))
+                elif self.path=='/api/upload':
+                    return self.reply(200,InboxState(ROOT).upload(data.get('name',''),data.get('data','')))
                 elif self.path=='/api/delivery':
                     return self.reply(200,check_delivery(ROOT,MAILBOX))
                 elif self.path=='/api/message':
@@ -268,6 +288,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path in ('/api/reply','/api/compose'):
                     identifier=str(data.get('id',''));body=str(data.get('body','')).strip();sender=data.get('sender','Owner')
                     request_id=str(data.get('requestId',''))
+                    attachments=InboxState(ROOT).attachment_paths(data.get('attachments',[]))
                     import re
                     if not body or len(body)>20000 or not re.fullmatch('[a-f0-9-]{36}',request_id) or sender not in ('Owner','Shared',*(n for n,_,_ in STAFF)):raise ValueError()
                     composing=self.path=='/api/compose'
@@ -290,7 +311,7 @@ class Handler(BaseHTTPRequestHandler):
                         subject=original['subject'].replace('\r',' ').replace('\n',' ')[:190]
                         if not composing and not subject.lower().startswith('re:'):subject='Re: '+subject
                         result=mail.deliver(sender,['Owner'],subject,body,kind='compose' if composing else 'manual',reply_address=original['replyTo'],
-                            in_reply_to=original['messageId'],references=original['references'] or None)
+                            in_reply_to=original['messageId'],references=original['references'] or None,attachments=attachments)
                         db.execute('UPDATE replies SET status=? WHERE id=?',(result,request_id));db.commit()
                         return self.reply(200,{'result':result})
                     finally:db.close()

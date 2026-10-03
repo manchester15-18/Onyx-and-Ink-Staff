@@ -1,0 +1,46 @@
+# Application changelog
+
+## 2026-10-03 — Inbox and staff chat improvements
+
+- Set the Owner mailbox to ceo@onyxandink.org.
+- Added an agent selector inside the chat drawer.
+- Added paginated inbox views, search, attachment uploads for replies and new emails, and attachment downloads.
+- Added explicit Gmail deletion using Trash, with dashboard confirmation and restricted agent commands.
+- Added dashboard-only hiding and restoration. Automatic cleanup defaults to 30 days and never removes messages from Gmail.
+- Improved protection against stale inbox responses and switching messages during attachment uploads.
+- Scheduled nightly source backups at 3 a.m. Eastern, with automatic dated changelog entries for source updates.
+
+## 2026-10-03 18:56 EDT — Application update
+
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard appearance and responsive layout (`dashboard/style.css`).
+- Updated Gmail inbox access and message handling (`dashboard_mail.py`).
+- Updated GitHub backup and changelog safeguards (`github_sync.py`).
+- Updated dashboard-only inbox cleanup and attachment uploads (`inbox_state.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_inbox_revamp.py (`tests/test_inbox_revamp.py`).
+
+<!-- backup 45ed7fa3fc6b7cc10f0b5d282917daaa3f747407b8e5941f0c83af4731b852e8 -->
+
+## 2026-10-03 18:59 EDT — Application update
+
+- Updated .gitignore (`.gitignore`).
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard appearance and responsive layout (`dashboard/style.css`).
+- Updated Gmail inbox access and message handling (`dashboard_mail.py`).
+- Updated GitHub backup and changelog safeguards (`github_sync.py`).
+- Updated dashboard-only inbox cleanup and attachment uploads (`inbox_state.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_inbox_revamp.py (`tests/test_inbox_revamp.py`).
+
+<!-- backup 5a0fc7bf04194de3cfba37b8f1735a97345a4ee6824d461a77c0dc0d468db063 -->

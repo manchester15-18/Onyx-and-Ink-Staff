@@ -3,6 +3,7 @@
 !/.gitignore
 !/.env.example
 !/README.md
+!/CHANGELOG.md
 !/requirements.txt
 !/*.py
 !/dashboard/

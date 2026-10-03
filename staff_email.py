@@ -133,14 +133,15 @@ class StaffMail:
         for attachment in attachments or []:
             attachment = Path(attachment).resolve()
             artifact_root = (Path(self.outbox).parents[1] / 'artifacts').resolve()
-            if not attachment.is_relative_to(artifact_root) or not attachment.is_file() or attachment.stat().st_size > 15_000_000:
+            upload_root = (Path(self.outbox).parents[1] / 'uploads').resolve()
+            if not (attachment.is_relative_to(artifact_root) or attachment.is_relative_to(upload_root)) or not attachment.is_file() or attachment.stat().st_size > 15_000_000:
                 raise ValueError('Only generated staff files can be attached (15 MB maximum).')
             attachment_total += attachment.stat().st_size
             if attachment_total > 15_000_000:raise ValueError('Combined attachments exceed 15 MB.')
             import mimetypes
             mime = mimetypes.guess_type(attachment.name)[0] or 'application/octet-stream'
             major, minor = mime.split('/', 1)
-            message.add_attachment(attachment.read_bytes(), maintype=major, subtype=minor, filename=attachment.name)
+            message.add_attachment(attachment.read_bytes(), maintype=major, subtype=minor, filename=attachment.name.split('--',1)[-1])
         self.outbox.mkdir(parents=True, exist_ok=True)
         path = self.outbox / f'{self.count:02d}-{sender.lower()}.eml'
         path.write_bytes(message.as_bytes())

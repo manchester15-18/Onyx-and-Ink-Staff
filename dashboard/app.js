@@ -15,7 +15,8 @@ const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES=
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach the AI service/;
 let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0;
-const busy=new Set();
+const busy=new Set();let inboxMessages=[],inboxNext=null,inboxVersion=0,readVersion=0,replyAttachments=[],composeAttachments=[],uploading=0;
+
 const isBad=a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted';
 
 /* ---------- plumbing ---------- */
@@ -48,6 +49,7 @@ function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S
 /* ---------- rendering ---------- */
 function render(){
   $('connection').textContent='Connected locally';
+  if(document.activeElement!==$('cleanupDays'))$('cleanupDays').value=String(S.cleanupDays??30);
   $('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[S.mode]||S.mode;
   $('modeNote').textContent=S.mode==='send'?'Monitor may send on its own':'Approval required to send';
   $('monitor').textContent=S.monitor?'Running':'Stopped';$('monitorNote').textContent=S.monitor?(S.enabled?'Background monitoring enabled':'Monitor running'):'Start in Settings';
@@ -125,28 +127,60 @@ function showPage(){let p=location.pathname.split('/')[1]||'overview';if(!PAGES.
 function navigate(p){history.pushState({},'','/'+p);showPage()}
 document.querySelectorAll('[data-nav]').forEach(a=>a.addEventListener('click',e=>{if(e.metaKey||e.ctrlKey)return;e.preventDefault();navigate(a.dataset.nav)}));
 addEventListener('popstate',showPage);
-function pickAgent(n){agent=n;$('cw').textContent=n;syncDrafter();render();loadChat()}
+function pickAgent(n){agent=n;$('chatAgent').value=n;$('cw').textContent=n;syncDrafter();render();loadChat()}
 const drafter=()=>{const v=$('replySender').value;return S&&S.agents.some(a=>a.name===v)?v:agent};
 function syncDrafter(){$('draftWho').textContent=drafter()}
 
 /* ---------- inbox ---------- */
-async function loadInbox(force){if(inboxBusy)return;inboxBusy=true;const mailbox=$('mailboxSelect').value;$('refreshInbox').disabled=true;
-  if(!inboxLoaded)$('inboxList').replaceChildren(...[1,2,3,4].map(()=>el('div','sk')));
-  try{const d=await api('inbox',{refresh:force,mailbox});if(mailbox!==$('mailboxSelect').value)return;inboxLoaded=true;
-    $('inboxList').replaceChildren(...(d.messages.length?d.messages.map(m=>{const b=el('button','m'+(m.unread?' unread':''));b.append(el('b','',m.subject||'(No subject)'),el('small','',m.from+' · '+m.date));b.onclick=()=>openMail(m.id,b);return b}):[el('p','empty','Your inbox is empty.')]));
-    const unread=d.messages.filter(m=>m.unread).length;$('unreadBadge').hidden=!unread;$('unreadBadge').textContent=unread;$('inboxNotice').textContent=''}
-  catch(e){$('inboxNotice').textContent=e.message;$('inboxList').replaceChildren()}finally{inboxBusy=false;$('refreshInbox').disabled=false}}
-async function openMail(id,btn){document.querySelectorAll('#inboxList .m').forEach(x=>x.classList.toggle('on',x===btn));
-  try{opened=await api('message',{id});replyId=crypto.randomUUID();
+function renderInbox(){
+  const query=$('inboxSearch').value.trim().toLowerCase(),items=inboxMessages.filter(m=>(m.subject+' '+m.from+' '+(m.snippet||'')).toLowerCase().includes(query));
+  $('inboxList').replaceChildren(...(items.length?items.map(m=>{const b=el('button','m'+(m.unread?' unread':'')+(opened?.id===m.id?' on':''));b.append(el('b','',m.subject||'(No subject)'),el('small','',m.from),el('small','',m.date),el('div','mailPreview',m.snippet||''));b.onclick=()=>openMail(m.id);return b}):[el('p','empty',inboxNext?'No matching messages on this page. Load more below.':'No emails in this view.')]));
+  $('moreInbox').hidden=!inboxNext;const unread=inboxMessages.filter(m=>m.unread).length;$('unreadBadge').hidden=!unread;$('unreadBadge').textContent=unread;
+}
+async function loadInbox(force,append=false){
+  const version=++inboxVersion,mailbox=$('mailboxSelect').value,view=$('inboxView').value;inboxBusy=true;$('refreshInbox').disabled=true;$('moreInbox').disabled=true;
+  if(!inboxLoaded&&!append)$('inboxList').replaceChildren(...[1,2,3].map(()=>el('div','sk')));
+  try{const d=await api('inbox',{refresh:force,mailbox,view,pageToken:append?inboxNext:null});if(version!==inboxVersion)return;
+    inboxMessages=append?[...new Map([...inboxMessages,...d.messages].map(m=>[m.id,m])).values()]:d.messages;
+    inboxNext=d.nextPage;inboxLoaded=true;$('cleanupDays').value=String(d.cleanupDays);renderInbox();$('inboxNotice').textContent=view==='hidden'?'These emails remain in Gmail. Restore shows them on this dashboard.':'';
+  }catch(e){if(version===inboxVersion){$('inboxNotice').textContent=e.message;toast(e.message,'bad')}}
+  finally{if(version===inboxVersion){inboxBusy=false;$('refreshInbox').disabled=false;$('moreInbox').disabled=false}}
+}
+async function openMail(id){
+  if(uploading){toast('Wait for attachments to finish uploading.','warn');return}
+  if(opened?.id!==id&&$('replyBody').value.trim()&&!await sure('Discard your unsaved reply and open another email?'))return;
+  const version=++readVersion;$('inboxNotice').textContent='Opening email…';
+  try{const message=await api('message',{id});if(version!==readVersion)return;opened=message;replyId=crypto.randomUUID();replyAttachments=[];showAttachments('reply');
     $('mailSubject').textContent=opened.subject||'(No subject)';$('mailMeta').textContent=opened.from+' → '+opened.to+' · '+opened.date;$('mailBody').textContent=opened.body;
-    $('mailAttachments').textContent=opened.attachments.length?'Attachments: '+opened.attachments.join(', ')+' (open in Gmail to view)':'';
-    $('replyTo').textContent='→ '+opened.replyTo;
-    const box=$('mailboxSelect').value;$('replySender').value=SENDERS.includes(box)?box:(S.agents.some(a=>a.name===agent)?agent:'Owner');
-    $('replyBody').value='';$('draftTag').hidden=true;$('sendReply').disabled=false;syncDrafter();$('reader').hidden=false;$('reader').scrollIntoView({block:'nearest'})}
-  catch(e){toast(e.message,'bad')}}
-on('refreshInbox','click',()=>loadInbox(true));
-on('mailboxSelect','change',()=>{const url=new URL(location.href);url.searchParams.set('mailbox',$('mailboxSelect').value);history.replaceState({},'',url);inboxLoaded=false;opened=null;$('reader').hidden=true;loadInbox(false)});
+    const files=opened.attachmentDetails||[];$('mailAttachments').replaceChildren(...files.map(f=>{const a=el('a','fileChip',f.name+' · '+Math.ceil(f.size/1024)+' KB');a.href='/api/attachment?id='+encodeURIComponent(id)+'&part='+encodeURIComponent(f.part);return a}));
+    $('replyTo').textContent='→ '+opened.replyTo;const box=$('mailboxSelect').value;$('replySender').value=SENDERS.includes(box)?box:(S.agents.some(a=>a.name===agent)?agent:'Owner');
+    $('replyBody').value='';$('draftTag').hidden=true;$('sendReply').disabled=uploading>0;syncDrafter();$('reader').hidden=false;$('inboxNotice').textContent='';
+    $('hideMail').textContent=inboxMessages.find(m=>m.id===id)?.dashboardHidden?'Restore to dashboard':'Hide from dashboard';renderInbox();$('reader').scrollIntoView({block:'nearest'});
+  }catch(e){if(version===readVersion){$('inboxNotice').textContent=e.message;toast(e.message,'bad')}}
+}
+function closeReader(){++readVersion;opened=null;$('reader').hidden=true;$('replyBody').value='';replyAttachments=[];showAttachments('reply')}
+on('refreshInbox','click',()=>loadInbox(true));on('moreInbox','click',()=>loadInbox(false,true));on('inboxSearch','input',renderInbox);
+function switchInbox(){const url=new URL(location.href);url.searchParams.set('mailbox',$('mailboxSelect').value);history.replaceState({},'',url);inboxLoaded=false;closeReader();loadInbox(false)}
+on('mailboxSelect','change',switchInbox);on('inboxView','change',switchInbox);
+on('closeReader','click',async()=>{if(!$('replyBody').value.trim()||await sure('Discard the unsaved reply?'))closeReader()});
+on('deleteMail','click',async()=>{
+  const message=opened;if(!message||!await sure('Move “'+message.subject+'” to Gmail Trash? This removes it from the actual Gmail inbox.','Delete from Gmail'))return;
+  $('deleteMail').disabled=true;try{const r=await api('delete-email',{id:message.id,confirm:true});if(opened?.id===message.id)closeReader();toast(r.message);await loadInbox(true)}catch(e){toast(e.message+' Refresh before retrying.','bad')}finally{$('deleteMail').disabled=false}
+});
+on('hideMail','click',async()=>{if(!opened)return;const id=opened.id,hidden=!inboxMessages.find(m=>m.id===id)?.dashboardHidden;try{const r=await api('hide-email',{id,hidden});closeReader();toast(r.message);await loadInbox(false)}catch(e){toast(e.message,'bad')}});
 on('replySender','change',syncDrafter);
+on('chatAgent','change',()=>pickAgent($('chatAgent').value));
+on('saveCleanup','click',async()=>{try{await api('inbox-settings',{days:Number($('cleanupDays').value)});toast('Dashboard cleanup saved. Gmail is unchanged.');inboxLoaded=false;if(page==='inbox')loadInbox(false)}catch(e){toast(e.message,'bad')}});
+function showAttachments(kind){const items=kind==='reply'?replyAttachments:composeAttachments;$(kind+'FileList').replaceChildren(...items.map(f=>{const chip=el('span','fileChip',f.name);const b=el('button','','×');b.type='button';b.setAttribute('aria-label','Remove '+f.name);b.onclick=()=>{const next=items.filter(x=>x.id!==f.id);if(kind==='reply')replyAttachments=next;else composeAttachments=next;showAttachments(kind)};chip.append(b);return chip}))}
+async function uploadFiles(kind){
+  const input=$(kind+'Files'),files=[...input.files],items=kind==='reply'?replyAttachments:composeAttachments;
+  if(items.length+files.length>5||files.some(f=>f.size>10000000)||[...items,...files].reduce((n,f)=>n+f.size,0)>15000000){toast('Use up to 5 files: 10 MB each and 15 MB combined.','warn');input.value='';return}
+  uploading++;$('mailboxSelect').disabled=true;$('inboxView').disabled=true;$('closeReader').disabled=true;$('composeClose').disabled=true;$('replyFiles').disabled=true;$('composeFiles').disabled=true;$('sendReply').disabled=true;$('sendCompose').disabled=true;
+  try{for(const file of files){const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('File could not be read.'));reader.readAsDataURL(file)});const r=await api('upload',{name:file.name,data});if(kind==='reply')replyAttachments.push(r);else composeAttachments.push(r);showAttachments(kind)}}
+  catch(e){toast(e.message,'bad')}finally{input.value='';uploading--;$('mailboxSelect').disabled=uploading>0;$('inboxView').disabled=uploading>0;$('closeReader').disabled=uploading>0;$('composeClose').disabled=uploading>0;$('replyFiles').disabled=uploading>0;$('composeFiles').disabled=uploading>0;$('sendReply').disabled=uploading>0;$('sendCompose').disabled=uploading>0}
+}
+on('replyFiles','change',()=>uploadFiles('reply'));on('composeFiles','change',()=>uploadFiles('compose'));
+
 
 /* Agent drafting: the answer lands in the reply box, ready to edit. */
 async function draftReply(instruction){
@@ -169,21 +203,21 @@ document.querySelectorAll('[data-tweak]').forEach(b=>b.addEventListener('click',
 async function sendReply(){const body=$('replyBody').value.trim();if(!opened||!body||drafting||$('sendReply').disabled)return;$('sendReply').disabled=true;
   try{await refresh();if(S.mode==='off')throw Error('Email is off. Select Draft or Live in Settings.');
     if(S.mode==='send'&&!await sure('Send this reply to '+opened.replyTo+' now? The configured owner BCC address is included.')){$('sendReply').disabled=false;return}
-    const r=await api('reply',{id:opened.id,body,sender:$('replySender').value,requestId:replyId});
+    const r=await api('reply',{id:opened.id,body,sender:$('replySender').value,requestId:replyId,attachments:replyAttachments.map(f=>f.id)});
     toast(r.result,/unconfirmed/.test(r.result)?'warn':'ok',S.mode==='draft'?['Open Outbox',()=>navigate('activity')]:null);
-    $('replyBody').value='';$('draftTag').hidden=true;sig='';await refresh()}
+    $('replyBody').value='';replyAttachments=[];showAttachments('reply');$('draftTag').hidden=true;sig='';await refresh()}
   catch(e){toast(e.message+' If delivery is uncertain, check the Outbox before retrying.','bad');$('sendReply').disabled=false}}
 on('sendReply','click',sendReply);
 on('replyBody','input',()=>{if($('sendReply').disabled&&!drafting){$('sendReply').disabled=false;replyId=crypto.randomUUID()}});
 on('replyBody','keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendReply()}});
 
 /* ---------- compose ---------- */
-on('composeMail','click',()=>{composeId=crypto.randomUUID();const b=$('mailboxSelect').value;$('composeSender').value=SENDERS.includes(b)?b:'Owner';
+on('composeMail','click',()=>{composeId=crypto.randomUUID();composeAttachments=[];showAttachments('compose');const b=$('mailboxSelect').value;$('composeSender').value=SENDERS.includes(b)?b:'Owner';
   ['composeTo','composeSubject','composeBody'].forEach(i=>$(i).value='');$('sendCompose').disabled=false;$('sendCompose').textContent=S.mode==='draft'?'Save for approval':'Send email';$('composeDetail').showModal()});
 on('composeClose','click',()=>$('composeDetail').close());
 on('sendCompose','click',async()=>{if(!$('composeTo').checkValidity()||!$('composeSubject').value.trim()||!$('composeBody').value.trim()){toast('Enter a valid recipient, subject, and message.','warn');return}
   if(S.mode==='send'&&!await sure('Send this new email to '+$('composeTo').value+'?'))return;$('sendCompose').disabled=true;
-  try{const r=await api('compose',{sender:$('composeSender').value,to:$('composeTo').value,subject:$('composeSubject').value,body:$('composeBody').value,requestId:composeId});
+  try{const r=await api('compose',{sender:$('composeSender').value,to:$('composeTo').value,subject:$('composeSubject').value,body:$('composeBody').value,requestId:composeId,attachments:composeAttachments.map(f=>f.id)});
     $('composeDetail').close();toast(r.result,'ok',S.mode==='draft'?['Open Outbox',()=>navigate('activity')]:null);sig='';await refresh()}
   catch(e){toast(e.message+' If delivery is uncertain, do not recreate and resend.','bad');$('sendCompose').disabled=false}});
 

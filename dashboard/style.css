@@ -130,3 +130,11 @@ kbd{font:600 10px ui-monospace,Menlo,monospace;border:1px solid var(--line2);bor
 .right[hidden]{display:none!important}.right .chat{min-height:0}.right .needsBox{max-height:24%}
 .artifact img{width:100%;max-height:220px;object-fit:contain;border-radius:8px}.artifact a{display:block;margin-top:10px;overflow-wrap:anywhere}
 @media(max-width:1000px){.toolbar{align-items:flex-start}.toolbar .team{flex-wrap:wrap}.right{border-top:0}.right .chat{min-height:0}}
+
+.chatSwitch{display:flex;align-items:center;gap:12px;margin-bottom:12px;color:var(--mut)}.chatSwitch select{flex:1}
+.inbox{grid-template-columns:minmax(280px,360px) minmax(0,1fr);align-items:start}.list{min-width:0}#inboxSearch{width:100%;margin-bottom:12px}
+.readerTools{display:flex;gap:8px;flex-wrap:wrap;position:sticky;top:0;background:var(--solid);padding:10px 0;z-index:1}#deleteMail{color:var(--bad)}
+#reader{min-width:0;border:1px solid var(--line);border-radius:16px;padding:20px;background:var(--p1)}#mailSubject{overflow-wrap:anywhere;font-size:26px}#mailBody{max-height:42vh;overflow:auto}
+.attachmentPicker{margin:12px 0}.attachmentPicker label{display:inline-block;cursor:pointer}.attachmentList{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}.fileChip{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;background:var(--p2);border:1px solid var(--line);border-radius:10px;font-size:12px;overflow-wrap:anywhere}.fileChip button{border:0;background:none;color:var(--bad);cursor:pointer}
+#moreInbox{width:100%;margin-top:10px}.mailPreview{font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mut);margin-top:7px}
+@media(max-width:1000px){.inbox{grid-template-columns:1fr}#reader{padding:14px}}

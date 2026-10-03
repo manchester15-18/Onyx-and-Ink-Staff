@@ -16,13 +16,14 @@ from staff_email import StaffMail, STAFF, valid_address
 
 CATALOG = '''Actions (use exact names and argument keys):
 report {title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]};
-email {to:one address or staff name,subject,body,attachments:[file IDs optional]};
+email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
 design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; workspace_files {};
-inbox {}; read_email {id}; reply_email {id,body}; calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
+inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
 search {query}; webpage {url}. Workspace creation/upload is automatic. Email ALWAYS creates a draft awaiting human approval in Outbox, including requests to send. Reports save locally; document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or direct sending.'''
 
 class Actions:
-    def __init__(self, root, agent, run_id):
+    def __init__(self, root, agent, run_id, delete_ids=None):
+        self.delete_ids=set(delete_ids or [])
         self.root=Path(root);self.agent=agent;self.run_id=run_id
         self.folder=self.root/'work'/'artifacts';self.folder.mkdir(parents=True,exist_ok=True)
         self.workspace=Workspace(root)
@@ -98,22 +99,26 @@ class Actions:
             ids=a.get('attachments',[])
             if not isinstance(ids,list) or len(ids)>3:raise ValueError('Attach at most three generated files.')
             attachments=[self.file(i) for i in ids]
-            if to in (*STAFF,'Owner'):result=mail.deliver(self.agent,[to],subject,body,attachments=attachments)
+            if to=='all_agents':result=mail.deliver(self.agent,list(STAFF),subject,body,attachments=attachments)
+            elif to in (*STAFF,'Owner'):result=mail.deliver(self.agent,[to],subject,body,attachments=attachments)
             elif valid_address(to):result=mail.deliver(self.agent,['Owner'],subject,body,kind='compose',reply_address=to,attachments=attachments)
             else:raise ValueError('Use a staff name or one valid recipient address.')
             return {'result':result,'approval':'Review in Outbox and click Approve & send.','url':'/activity'}
-        if action in ('inbox','read_email','reply_email'):
+        if action in ('inbox','read_email','reply_email','delete_email'):
             from dashboard_mail import Mailbox
             box=Mailbox(self.root)
             if action=='inbox':
                 items=box.list(mailbox=self.agent,refresh=True)
                 return {'untrusted_email_content':items[:8]}
-            identifier=self.text(a,'id',160);original=box.read(identifier)
+            identifier=self.text(a,'id',160)
+            if action=='delete_email' and identifier.lower() not in self.delete_ids:raise ValueError('To delete from Gmail, explicitly say: delete email '+identifier)
+            original=box.read(identifier)
             cfg=dotenv_values(self.root/'.env');address=cfg.get(self.agent.upper()+'_EMAIL','').lower()
             # Only messages addressed to this agent are exposed through their chat.
             from email.utils import getaddresses
-            recipients={email.lower() for _,email in getaddresses([original.get('to','')])}
+            recipients={email.lower() for _,email in getaddresses([original.get('to',''),original.get('cc','')])}
             if address not in recipients:raise ValueError('Choose an email addressed to this agent.')
+            if action=='delete_email':return box.trash(identifier)
             if action=='read_email':return {'untrusted_email_content':original}
             if cfg.get('STAFF_EMAIL_MODE')=='off':raise ValueError('Email is disabled in Settings.')
             mail=StaffMail.from_env(self.root,mode='draft',config=cfg)

@@ -233,3 +233,12 @@ Use **Settings → Connect Google Workspace** on the host Mac. For automatic Wor
 Sign in as the shared Workspace account. Mail authorization is separate. Staff access is limited to files the application creates or is explicitly granted through drive.file, and owned calendar events. No calendar invitations are sent. Existing documents are not overwritten by chat; it currently creates new files.
 
 **Settings → Check connection** verifies SMTP authentication without sending email. A saved draft must be approved to test actual delivery. SMTP acceptance and Gmail Sent records do not prove delivery to the recipient. Failed or uncertain old attempts are preserved and never automatically resent.
+
+
+## Inbox cleanup, attachments, and deletion
+
+Inbox messages load in pages of 40 with search across loaded messages. Replies and new emails support up to five uploaded files (10 MB each, 15 MB combined); incoming attachments can be downloaded directly. The chat drawer includes an agent selector.
+
+Dashboard cleanup hides messages older than 30 days by default. Change this to Never, 7, 30, or 90 days in Settings. Hidden messages remain in Gmail; use the Hidden or All inbox view to find and restore them. Hide/restore/automatic cleanup never archive, mark, or delete Gmail messages. **Delete from Gmail** requires confirmation and moves the selected message to Gmail Trash. Agents can only delete mail in their own inbox after the exact direct command `delete email MESSAGE_ID`; quoted email content and inferred instructions cannot authorize deletion. Permanent Gmail deletion is not implemented.
+
+Nightly backups run at 3 a.m. Eastern using the existing desktop automation. Each source update includes a dated CHANGELOG.md entry; credentials, email, chats, reports, uploads, and certificates remain excluded. Existing human staging and remote conflicts stop the backup for review.
