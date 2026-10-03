@@ -216,3 +216,20 @@ For Telegram, privately message the official @BotFather, use /newbot, and copy t
 GitHub receives application code, dashboard assets, tests, dependency requirements, and this guide. Local `.env` credentials, Google authorization, Wi-Fi passwords/private keys, emails, chat history, generated reports, temporary files, and the Python environment are excluded. This is a code backup; those private runtime files require a separate secure backup.
 
 `github_sync.py` checks exportable files for configured secrets and common key formats before committing and pushing to `main`. It refuses unexpected tracked files, symlinks, existing staged work, credentials embedded in a remote URL, or remote changes requiring a merge. It never force pushes. Automated checks run through the Codex recurring task once GitHub setup is finished. The Mac and Codex must be available for scheduled runs; offline changes sync when a later run succeeds.
+
+
+## Actions from staff chat
+
+Open **Agent chat** in the toolbar or select a staff member. The drawer stays closed on other pages until opened. All four staff agents can create local reports, draft email, generate Cloudflare designs, research public websites through Serper, create Google Docs/Sheets/Slides, upload generated files to Drive, and create events on the connected account's primary calendar. Chat requests run a maximum of six reasoning steps; completed actions appear under Created files. Emails from chat always wait in Outbox for **Approve & send**, even if the monitor is in Live mode. Files created through Telegram chat are also sent back to the paired private conversation.
+
+Configure Cloudflare on the host Mac in **Settings → Cloudflare designs**. Use a Workers AI token, account ID, and the Workers Free plan. Generation has a conservative local cap of 50 attempts/day (UTC), counts uncertain requests, and never switches to a paid provider. Both models share Cloudflare's account-wide allowance; other account usage can exhaust it sooner. Schnell is the default. Klein supports editing a previously generated design using its file ID; live rendering requires provider validation after credentials are entered. Generated designs require checking dimensions, spelling, and resolution against the physical product before printing.
+
+Use **Settings → Connect Google Workspace** on the host Mac. For automatic Workspace creation, enable Google Drive, Docs, Sheets, Slides, and Calendar APIs in the existing OAuth client project, then run:
+
+```bash
+./venv/bin/python workspace_tools.py --authorize
+```
+
+Sign in as the shared Workspace account. Mail authorization is separate. Staff access is limited to files the application creates or is explicitly granted through drive.file, and owned calendar events. No calendar invitations are sent. Existing documents are not overwritten by chat; it currently creates new files.
+
+**Settings → Check connection** verifies SMTP authentication without sending email. A saved draft must be approved to test actual delivery. SMTP acceptance and Gmail Sent records do not prove delivery to the recipient. Failed or uncertain old attempts are preserved and never automatically resent.

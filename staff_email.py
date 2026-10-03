@@ -59,30 +59,31 @@ class StaffMail:
                     raise ValueError(f'Configure SMTP credentials for {name}; never paste passwords into chat.')
 
     @classmethod
-    def from_env(cls, project_dir, mode=None):
-        addresses = {name: os.getenv(f'{name.upper()}_EMAIL', '') for name in (*STAFF, 'Owner')}
-        addresses['Shared'] = os.getenv('GOOGLE_MAIL_USER') or os.getenv('SMTP_USER', '')
+    def from_env(cls, project_dir, mode=None, config=None):
+        get = os.getenv if config is None else config.get
+        addresses = {name: get(f'{name.upper()}_EMAIL', '') for name in (*STAFF, 'Owner')}
+        addresses['Shared'] = get('GOOGLE_MAIL_USER') or get('SMTP_USER', '')
         credentials = {name: (
-            os.getenv(f'{name.upper()}_SMTP_USER') or os.getenv('SMTP_USER', ''),
-            os.getenv(f'{name.upper()}_SMTP_PASSWORD') or os.getenv('SMTP_PASSWORD', ''),
+            get(f'{name.upper()}_SMTP_USER') or get('SMTP_USER', ''),
+            get(f'{name.upper()}_SMTP_PASSWORD') or get('SMTP_PASSWORD', ''),
         ) for name in STAFF}
         try:
-            port = int(os.getenv('SMTP_PORT', '587'))
+            port = int(get('SMTP_PORT', '587'))
         except ValueError:
             raise ValueError('SMTP_PORT must be 465 or 587.') from None
         oauth = None
-        method = os.getenv('GOOGLE_MAIL_AUTH', 'password').lower()
+        method = get('GOOGLE_MAIL_AUTH', 'password').lower()
         if method not in ('password', 'oauth'):
             raise ValueError('GOOGLE_MAIL_AUTH must be oauth or password.')
         if method == 'oauth':
             from google_mail_auth import GoogleMailAuth
-            oauth = GoogleMailAuth(project_dir, os.getenv('GOOGLE_MAIL_USER', ''))
-        return cls(project_dir, (mode or os.getenv('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
-                   os.getenv('SMTP_HOST', ''), port, os.getenv('SMTP_SECURITY', 'starttls'), credentials,
-                   team_updates=os.getenv('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
-                   bcc=os.getenv('OWNER_BCC_EMAIL', ''), oauth=oauth)
+            oauth = GoogleMailAuth(project_dir, get('GOOGLE_MAIL_USER', ''))
+        return cls(project_dir, (mode or get('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
+                   get('SMTP_HOST', ''), port, get('SMTP_SECURITY', 'starttls'), credentials,
+                   team_updates=get('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
+                   bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth)
 
-    def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None):
+    def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None):
         if self.mode == 'off':
             return 'Staff email is disabled.'
         if sender not in STAFF and not (sender in ('Owner', 'Shared') and kind in ('manual', 'compose')):
@@ -128,6 +129,18 @@ class StaffMail:
             if kind != 'forward' or recipients != ['Owner']:
                 raise ValueError('Original mail can only be forwarded to Owner.')
             message.add_attachment(forwarded_message)
+        attachment_total = 0
+        for attachment in attachments or []:
+            attachment = Path(attachment).resolve()
+            artifact_root = (Path(self.outbox).parents[1] / 'artifacts').resolve()
+            if not attachment.is_relative_to(artifact_root) or not attachment.is_file() or attachment.stat().st_size > 15_000_000:
+                raise ValueError('Only generated staff files can be attached (15 MB maximum).')
+            attachment_total += attachment.stat().st_size
+            if attachment_total > 15_000_000:raise ValueError('Combined attachments exceed 15 MB.')
+            import mimetypes
+            mime = mimetypes.guess_type(attachment.name)[0] or 'application/octet-stream'
+            major, minor = mime.split('/', 1)
+            message.add_attachment(attachment.read_bytes(), maintype=major, subtype=minor, filename=attachment.name)
         self.outbox.mkdir(parents=True, exist_ok=True)
         path = self.outbox / f'{self.count:02d}-{sender.lower()}.eml'
         path.write_bytes(message.as_bytes())

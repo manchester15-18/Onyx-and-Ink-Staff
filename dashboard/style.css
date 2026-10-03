@@ -121,3 +121,12 @@ kbd{font:600 10px ui-monospace,Menlo,monospace;border:1px solid var(--line2);bor
 .buttons h2{margin:0;font-size:22px}dialog h2{-webkit-text-fill-color:var(--fg);color:var(--fg);background:none}
 
 #confirmDlg{width:min(440px,92%)}#confirmText{line-height:1.6;color:var(--mut);overflow-wrap:anywhere}
+
+/* Chat is a toolbar drawer, closed until explicitly opened. */
+.app{grid-template-columns:210px minmax(0,1fr)}
+.toolbar{display:flex;align-items:center;gap:12px;padding-right:18px;border-bottom:1px solid var(--line)}
+.toolbar .team{flex:1;border-bottom:0;min-width:0}
+.right{position:fixed;right:0;top:0;bottom:0;width:min(440px,100vw);z-index:20;background:var(--solid);box-shadow:-12px 0 48px rgba(0,0,0,.35)}
+.right[hidden]{display:none!important}.right .chat{min-height:0}.right .needsBox{max-height:24%}
+.artifact img{width:100%;max-height:220px;object-fit:contain;border-radius:8px}.artifact a{display:block;margin-top:10px;overflow-wrap:anywhere}
+@media(max-width:1000px){.toolbar{align-items:flex-start}.toolbar .team{flex-wrap:wrap}.right{border-top:0}.right .chat{min-height:0}}

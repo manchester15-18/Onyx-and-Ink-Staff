@@ -11,7 +11,7 @@ if($('loginForm')){
   return;
 }
 
-const PAGES=['overview','inbox','activity','reports','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
+const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach the AI service/;
 let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0;
@@ -60,10 +60,13 @@ function render(){
   $('needBadge').hidden=!items.length;$('needBadge').textContent=items.length;
   const pending=S.activity.filter(a=>a.status==='draft'||isBad(a)).length;$('actBadge').hidden=!pending;$('actBadge').textContent=pending;
   $('team').replaceChildren(...S.agents.map(a=>{const[st,txt]=agentState(a.name);const b=el('button','ag'+(a.name===agent?' sel':''));
-    const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name+' · '+a.role),el('small','',txt));b.append(av,t);b.onclick=()=>pickAgent(a.name);return b}));
+    const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name+' · '+a.role),el('small','',txt));b.append(av,t);b.onclick=()=>{pickAgent(a.name);toggleChat(true)};return b}));
   $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
   $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
-  renderOutbox();renderReports();
+  renderOutbox();renderReports();renderFiles();
+  $('workspaceStatus').textContent=S.integrations?.workspace?'Connected · Workspace actions are automatic':'Google Workspace sign-in needed';
+  $('cloudflareStatus').textContent=S.integrations?.cloudflare?(S.integrations.freePlan?'Configured · Free plan confirmed':'Configured · confirm Free plan to enable designs'):'Enter credentials on this Mac';
+  if(document.activeElement!==$('cfFree'))$('cfFree').checked=!!S.integrations?.freePlan;
   $('wifiUrl').textContent=S.wifi?.enabled?S.wifi.url:'Wi-Fi access has not been enabled.';
   $('telegramStatus').textContent=S.telegram?.configured?(S.telegram.enabled?'Enabled':'Disabled')+' · '+S.telegram.paired+' paired':'Token needed';
   if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=!!S.telegram?.enabled;
@@ -97,7 +100,7 @@ function draftCard(a){
 function approveBtn(a){const b=el('button','btn','Approve & send');b.onclick=()=>{$('detail').close();approveDraft(a)};return b}
 
 async function approveDraft(a){
-  if(busy.has(a.id))return;if(!await sure('Send “'+(a.subject||'(No subject)')+'” to '+a.to+' now? Your personal Gmail will be BCC’d.','Approve & send'))return;
+  if(busy.has(a.id))return;if(!await sure('Send “'+(a.subject||'(No subject)')+'” to '+a.to+' now? The configured owner BCC address is included.','Approve & send'))return;
   busy.add(a.id);renderOutbox();
   try{const r=await api('approve',{id:a.id});toast(r.result,/unconfirmed/.test(r.result)?'warn':'ok')}
   catch(e){toast(e.message,'bad')}finally{busy.delete(a.id);sig='';await refresh()}}
@@ -165,7 +168,7 @@ document.querySelectorAll('[data-tweak]').forEach(b=>b.addEventListener('click',
 
 async function sendReply(){const body=$('replyBody').value.trim();if(!opened||!body||drafting||$('sendReply').disabled)return;$('sendReply').disabled=true;
   try{await refresh();if(S.mode==='off')throw Error('Email is off. Select Draft or Live in Settings.');
-    if(S.mode==='send'&&!await sure('Send this reply to '+opened.replyTo+' now? Your personal Gmail will be BCC’d.')){$('sendReply').disabled=false;return}
+    if(S.mode==='send'&&!await sure('Send this reply to '+opened.replyTo+' now? The configured owner BCC address is included.')){$('sendReply').disabled=false;return}
     const r=await api('reply',{id:opened.id,body,sender:$('replySender').value,requestId:replyId});
     toast(r.result,/unconfirmed/.test(r.result)?'warn':'ok',S.mode==='draft'?['Open Outbox',()=>navigate('activity')]:null);
     $('replyBody').value='';$('draftTag').hidden=true;sig='';await refresh()}
@@ -198,7 +201,7 @@ on('pairTelegram','click',async()=>{try{const r=await api('telegram-pair',{});$(
 /* ---------- chat (shared with Telegram) ---------- */
 async function loadChat(){if(!S||chatBusy)return;const who=agent;
   try{const r=await api('chat-history',{agent:who});if(who!==agent||chatBusy)return;
-    $('chatHistory').replaceChildren(...(r.messages.length?r.messages.map(m=>{const b=el('article','b '+m.role);b.append(el('p','',m.body),el('small','',(m.role==='user'?'You':who)+' · '+m.source+' · '+new Date(m.created.replace(' ','T')+'Z').toLocaleTimeString()));return b}):[el('p','empty','Start a conversation with '+who+'.')]));
+    $('chatHistory').replaceChildren(...(r.messages.length?r.messages.map(m=>{const b=el('article','b '+m.role);b.append(el('p','',m.body));for(const raw of new Set(m.body.match(/(?:https:\/\/docs\.google\.com\/[^\s"<>]+|\/api\/artifact\?id=[a-f0-9]{32}|\/activity)/g)||[])){const a=el('a','','Open result');a.href=raw;a.target=raw==='/activity'?'_self':'_blank';a.rel='noopener';b.append(a)}b.append(el('small','',(m.role==='user'?'You':who)+' · '+m.source+' · '+new Date(m.created.replace(' ','T')+'Z').toLocaleTimeString()));return b}):[el('p','empty','Start a conversation with '+who+'.')]));
     $('chatHistory').scrollTop=1e6}catch(e){$('chatNotice').textContent=e.message}}
 async function chatCall(who,body){
   chatBusy=true;$('sendChat').disabled=true;$('chatNotice').textContent='';
@@ -207,11 +210,20 @@ async function chatCall(who,body){
   finally{chatBusy=false;$('sendChat').disabled=false;await loadChat()}}
 async function askAgent(text){const body=text.trim();if(!body||chatBusy)return;$('chatBody').value='';
   try{const a=await chatCall(agent,body);if(FAILED.test(String(a)))toast('The agent could not respond. Check Groq connectivity and quota.','bad')}catch(e){$('chatBody').value=body;toast(e.message,'bad')}}
+function toggleChat(open){$('chatPanel').hidden=!open;$('toggleChat').setAttribute('aria-expanded',String(open));if(open){loadChat();$('chatBody').focus()}}
+on('toggleChat','click',()=>toggleChat($('chatPanel').hidden));on('closeChat','click',()=>toggleChat(false));
+on('checkSmtp','click',async()=>{$('checkSmtp').disabled=true;try{$('smtpNotice').textContent=(await api('smtp-check',{})).message}catch(e){$('smtpNotice').textContent=e.message}finally{$('checkSmtp').disabled=false}});
+on('connectWorkspace','click',async()=>{try{$('workspaceNotice').textContent=(await api('workspace-authorize',{})).message}catch(e){$('workspaceNotice').textContent=e.message}});
+on('saveCloudflare','click',async()=>{try{await api('cloudflare',{account:$('cfAccount').value.trim(),token:$('cfToken').value.trim(),freePlan:$('cfFree').checked});$('cfToken').value='';toast('Cloudflare credentials saved locally.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+function renderFiles(){
+  $('artifactList').replaceChildren(...(S.artifacts?.length?S.artifacts.map(f=>{const c=el('article','card artifact');c.append(el('b','',f.name),el('p','mut',f.agent+' · '+f.kind));
+    const url='/api/artifact?id='+encodeURIComponent(f.file_id);if(f.kind==='design'){const img=el('img');img.src=url;img.alt=f.name;c.append(img)}const a=el('a','','Open / download');a.href=url;a.target='_blank';a.rel='noopener';c.append(a);return c}):[el('p','empty','Ask an agent to create a report or design.')]));
+  $('actionList').replaceChildren(...(S.actions||[]).map(a=>{const c=el('article','card');c.append(el('b','',a.agent+' · '+a.action+' · '+a.status),el('p','mut',(()=>{try{const r=JSON.parse(a.result);return r.error||r.result||r.name||'Completed'}catch{return a.status}})()));return c}))}
 on('chatForm','submit',e=>{e.preventDefault();askAgent($('chatBody').value)});
 [['Summarize today','Summarize what needs my attention today based on our conversation.'],['What’s blocked?','What is blocked or waiting on my decision?']].forEach(([l,t])=>{const b=el('button','',l);b.type='button';b.onclick=()=>askAgent(t);$('chips').append(b)});
 
 /* ---------- command palette (Ctrl/Cmd+K or /) ---------- */
-const commands=()=>[...PAGES.map(p=>[(TITLES[p]||cap(p)),'Go to page',()=>navigate(p)]),...S.agents.map(a=>['Chat with '+a.name,a.role,()=>{pickAgent(a.name);$('chatBody').focus()}]),
+const commands=()=>[...PAGES.map(p=>[(TITLES[p]||cap(p)),'Go to page',()=>navigate(p)]),...S.agents.map(a=>['Chat with '+a.name,a.role,()=>{pickAgent(a.name);toggleChat(true)}]),
   ['New email','Compose',()=>$('composeMail').click()],['Refresh inbox','Gmail',()=>{navigate('inbox');loadInbox(true)}],['Check delivery','Outbox',()=>{navigate('activity');$('checkDelivery').click()}]];
 function paletteDraw(){const q=$('paletteInput').value.toLowerCase(),list=commands().filter(c=>(c[0]+' '+c[1]).toLowerCase().includes(q));pal=Math.min(pal,Math.max(0,list.length-1));
   $('paletteList').replaceChildren(...list.map((c,i)=>{const b=el('button','pi'+(i===pal?' sel':''));b.append(el('b','',c[0]),el('small','',c[1]));b.onclick=()=>{$('palette').close();c[2]()};return b}));return list}
@@ -222,5 +234,5 @@ on('paletteInput','keydown',e=>{const n=paletteDraw().length;if(!n)return;if(e.k
 addEventListener('keydown',e=>{const t=e.target.tagName;if((e.key==='k'&&(e.ctrlKey||e.metaKey))||(e.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(t)&&!document.querySelector('dialog[open]'))){e.preventDefault();openPalette()}});
 
 refresh().then(()=>{$('cw').textContent=agent;syncDrafter();loadChat()});
-setInterval(refresh,5000);setInterval(()=>{if(!chatBusy&&!drafting)loadChat()},10000);
+setInterval(refresh,5000);setInterval(()=>{if(!$('chatPanel').hidden&&!chatBusy&&!drafting)loadChat()},10000);
 })();

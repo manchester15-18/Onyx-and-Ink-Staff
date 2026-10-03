@@ -30,11 +30,13 @@ STAFF = [('Morgan','COO','MORGAN_EMAIL'),('Avery','Marketing','AVERY_EMAIL'),('J
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
 MONITOR = None
+WORKSPACE_SETUP = None
 MAILBOX = Mailbox(ROOT)
 STOP = threading.Event()
 DESIRED = ROOT/'work'/'monitor-enabled.json'
 from dashboard_access import Access
 from agent_chat import AgentChat, TelegramBridge
+from agent_actions import Actions
 ACCESS = Access(ROOT)
 CHAT = AgentChat(ROOT)
 TELEGRAM = TelegramBridge(ROOT,CHAT,STOP)
@@ -134,7 +136,12 @@ def snapshot():
     for path in sorted((ROOT/'reports').glob('*.md')):
         owner={'marketing_campaign':'Avery','web_dev_specs':'Jordan','legal_terms':'Cameron','operational_plan':'Morgan'}.get(path.stem,'Unassigned')
         reports.append({'name':path.stem.replace('_',' ').title(),'agent':owner,'body':clean(path.read_text()[:50000])})
-    return {'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
+    tools=Actions(ROOT,'Morgan','dashboard-status')
+    artifacts=tools.files()
+    for item in artifacts:
+        if item['kind']=='report':
+            reports.append({'name':item['name'],'agent':item['agent'],'body':clean(tools.file(item['file_id']).read_text()[:50000])})
+    return {'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':(ROOT/'work'/'google-workspace-token.json').exists(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true'},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
@@ -148,15 +155,7 @@ def outbox_file(identifier):
 
 
 def mail_from_config(config, mode=None):
-    env=dict(os.environ)
-    try:
-        for key,value in config.items():
-            if value is not None:os.environ[key]=value
-        return StaffMail.from_env(ROOT, mode=mode)
-    finally:
-        for key in config:
-            if key in env:os.environ[key]=env[key]
-            else:os.environ.pop(key,None)
+    return StaffMail.from_env(ROOT, mode=mode, config=config)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -179,12 +178,20 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/'):return self.reply(401,{'error':'Sign in to the dashboard.'})
             return self.reply(200,(ROOT/'dashboard'/'login.html').read_bytes(),'text/html; charset=utf-8')
         if path=='/api/status':return self.reply(200,snapshot())
-        names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        if path=='/api/artifact':
+            try:
+                tools=Actions(ROOT,'Morgan','download')
+                identifier=parse_qs(urlparse(self.path).query).get('id',[''])[0]
+                file=tools.file(identifier)
+                kind={'.png':'image/png','.md':'text/plain; charset=utf-8'}.get(file.suffix,'application/octet-stream')
+                return self.reply(200,file.read_bytes(),kind)
+            except (ValueError,OSError):return self.reply(404,{'error':'Generated file not found.'})
+        names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/files':'index.html','/app.js':'app.js','/style.css':'style.css'}
         if path not in names:return self.reply(404,{'error':'Not found.'})
         name=names[path];kind={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
         self.reply(200,(ROOT/'dashboard'/name).read_bytes(),kind)
     def do_POST(self):
-        global MONITOR
+        global MONITOR, WORKSPACE_SETUP
         origin=self.headers.get('Origin','')
         allowed_origin=origin in {'http://127.0.0.1:8765','http://localhost:8765',*('https://'+host for host in ACCESS.hosts() if host.endswith(':8766'))}
         if self.path=='/api/login' and self.allowed() and allowed_origin:
@@ -216,6 +223,33 @@ class Handler(BaseHTTPRequestHandler):
                         set_key(str(ROOT/'.env'),'TELEGRAM_BOT_TOKEN',token,quote_mode='never')
                     bridge=TELEGRAM.state();bridge['enabled']=bool(data.get('enabled'));TELEGRAM.save(bridge)
                     return self.reply(200,{'ok':True})
+                elif self.path=='/api/workspace-authorize':
+                    if self.client_address[0] not in ('127.0.0.1','::1'):return self.reply(403,{'error':'Connect Google Workspace on the host Mac.'})
+                    if WORKSPACE_SETUP and WORKSPACE_SETUP.poll() is None:return self.reply(200,{'message':'Google sign-in is already open on this Mac.'})
+                    if not (ROOT/'google-oauth-client.json').exists():return self.reply(409,{'error':'The Google Desktop client file is missing.'})
+                    with (ROOT/'work'/'workspace-setup.log').open('ab') as output:
+                        WORKSPACE_SETUP=subprocess.Popen([sys.executable,'-u',str(ROOT/'workspace_tools.py'),'--authorize'],cwd=ROOT,stdout=output,stderr=output)
+                    return self.reply(200,{'message':'Google sign-in is opening on this Mac. Select the shared Workspace account and review the requested access.'})
+                elif self.path=='/api/cloudflare':
+                    if self.client_address[0] not in ('127.0.0.1','::1'):return self.reply(403,{'error':'Configure provider credentials on the host Mac.'})
+                    import re
+                    account=str(data.get('account','')).strip();token=str(data.get('token','')).strip()
+                    if not re.fullmatch('[a-fA-F0-9]{32}',account) or (token and not re.fullmatch('[A-Za-z0-9_-]{20,256}',token)):raise ValueError()
+                    set_key(str(ROOT/'.env'),'CLOUDFLARE_ACCOUNT_ID',account,quote_mode='never')
+                    if token:set_key(str(ROOT/'.env'),'CLOUDFLARE_API_TOKEN',token,quote_mode='never')
+                    set_key(str(ROOT/'.env'),'CLOUDFLARE_FREE_PLAN_CONFIRMED','true' if data.get('freePlan') is True else 'false',quote_mode='never')
+                    (ROOT/'.env').chmod(0o600)
+                    return self.reply(200,{'ok':True})
+                elif self.path=='/api/smtp-check':
+                    import smtplib
+                    config=dotenv_values(ROOT/'.env');mail=mail_from_config(config,mode='send')
+                    context=ssl.create_default_context()
+                    client=smtplib.SMTP_SSL(mail.host,mail.port,context=context,timeout=30) if mail.security=='ssl' else smtplib.SMTP(mail.host,mail.port,timeout=30)
+                    with client:
+                        if mail.security=='starttls':client.ehlo();client.starttls(context=context);client.ehlo()
+                        if mail.oauth:mail.oauth.smtp_login(client)
+                        else:client.login(*mail.credentials['Morgan'])
+                    return self.reply(200,{'message':'SMTP authentication successful. No email sent. Approve a new draft to test delivery.'})
                 elif self.path=='/api/telegram-pair':return self.reply(200,{'code':TELEGRAM.pairing()})
                 elif self.path=='/api/mode':
                     if data.get('mode') not in ('off','draft','send'):raise ValueError()
