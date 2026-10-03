@@ -1,0 +1,33 @@
+# Only application source, documentation, and tests are exported.
+*
+!/.gitignore
+!/.env.example
+!/README.md
+!/requirements.txt
+!/*.py
+!/dashboard/
+/dashboard/*
+!/dashboard/*.html
+!/dashboard/*.css
+!/dashboard/*.js
+!/tests/
+/tests/*
+!/tests/test_*.py
+# Private configuration and runtime data stay on this Mac.
+.env*
+!/.env.example
+.emv*
+*.before-*
+*.pem
+*.key
+*.crt
+*.sqlite*
+*.eml
+*.rtf
+__pycache__/
+venv/
+work/
+reports/
+Users/
+code/
+.DS_Store

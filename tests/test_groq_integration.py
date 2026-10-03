@@ -1,0 +1,108 @@
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import socket
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+os.environ.setdefault('CREWAI_TELEMETRY_DISABLED', 'true')
+os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
+import main
+import httpx
+from groq_llm import GroqLLM, RequestBudget
+from openai import OpenAI
+from staff_email import StaffMail, STAFF
+
+
+class GroqTests(unittest.TestCase):
+    def test_key_errors_do_not_echo_secret(self):
+        with patch.dict(os.environ, {'GROQ_API_KEY': 'secret\u201ckey'}):
+            with self.assertRaises(ValueError) as error:
+                main.credential('GROQ_API_KEY')
+            self.assertNotIn('secret', str(error.exception))
+
+    def test_inventory(self):
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = main.check_blank_stock.run(item_names=['shirts', 'tumblers', 'missing'])
+        self.assertIn('150 units', result)
+        self.assertIn('240 units', result)
+        self.assertIn('SAMPLE', result)
+        self.assertIn('Not found', result)
+
+    def test_request_and_token_pacing(self):
+        budget = RequestBudget(2, 500)
+        clock = [100.0]
+        def sleep(delay): clock[0] += delay
+        request = httpx.Request('POST', 'https://api.groq.com/openai/v1/chat/completions', json={'messages': [{'role':'user','content':'hi'}], 'max_completion_tokens':100})
+        with patch('time.monotonic', lambda:clock[0]), patch('time.sleep',sleep), contextlib.redirect_stdout(io.StringIO()):
+            budget.before_request(request)
+            budget.before_request(request)
+            budget.before_request(request)
+        self.assertGreaterEqual(clock[0], 161)
+        huge = httpx.Request('POST','https://api.groq.com',json={'messages':[{'content':'x'*2000}]})
+        with self.assertRaises(ValueError): budget.before_request(huge)
+
+    def test_payload_and_full_crew_reports(self):
+        calls = []
+        def respond(request):
+            self.assertEqual(request.url.host, 'api.groq.com')
+            payload = json.loads(request.content)
+            self.assertEqual(payload['model'], 'openai/gpt-oss-120b')
+            self.assertEqual(payload['reasoning_effort'], 'low')
+            self.assertNotIn('stop', payload)
+            calls.append(payload)
+            content = (
+                'Thought: Check the sample inventory first.\nAction: Check sample blank inventory\nAction Input: {"item_names": ["shirt", "tumbler"]}'
+                if len(calls) == 1
+                else f'Final Answer: Department report {len(calls)}. Sample data only.'
+            )
+            return httpx.Response(200, json={'id':'mock','object':'chat.completion','created':0,'model':payload['model'],'choices':[{'index':0,'message':{'role':'assistant','content':content},'finish_reason':'stop'}],'usage':{'prompt_tokens':50,'completion_tokens':20,'total_tokens':70}})
+        llm = GroqLLM('offline-test-key')
+        llm.client.close()
+        llm.client = OpenAI(api_key='offline-test-key',base_url='https://api.groq.com/openai/v1',http_client=httpx.Client(transport=httpx.MockTransport(respond)),max_retries=0)
+        try:
+            with tempfile.TemporaryDirectory() as directory, patch.object(socket.socket,'connect',side_effect=AssertionError('Network forbidden')),contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                addresses={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
+                mail=StaffMail(directory,'draft',addresses)
+                crew=main.build_crew(llm, mail=mail)
+                self.assertTrue(all(any('Email from' in tool.name for tool in agent.tools) for agent in crew.agents))
+                result = crew.kickoff(inputs={'directive':'Test gift launch','report_dir':directory})
+                self.assertEqual(mail.count,3)  # Handoffs only until the run finishes.
+                mail.finish()
+                self.assertEqual(mail.count,7)  # Four end-of-run reports.
+                self.assertEqual(len(list(mail.outbox.glob('*.eml'))),7)
+                self.assertEqual(len(calls),5)
+                self.assertIn("240 units", json.dumps(calls[1]["messages"]))
+                for name in ['marketing_campaign.md','web_dev_specs.md','legal_terms.md','operational_plan.md']:
+                    self.assertTrue((Path(directory)/name).is_file(), name)
+                self.assertIn('Department report 5',str(result))
+                self.assertTrue(all('Test gift launch' in task.description for task in crew.tasks))
+                self.assertEqual(len(crew.tasks[-1].context),3)
+        finally: llm.close()
+
+    def test_http_retry_is_bounded_and_paced(self):
+        llm=GroqLLM('offline-test-key')
+        llm.client.close()
+        calls=[]
+        def respond(request):
+            calls.append(request)
+            if len(calls)==1: return httpx.Response(429,headers={'retry-after':'0.01'},json={'error':{'message':'temporary rate limit','type':'rate_limit_error'}})
+            return httpx.Response(200,json={'id':'mock','object':'chat.completion','created':0,'model':llm.model,'choices':[{'index':0,'message':{'role':'assistant','content':'Recovered'},'finish_reason':'stop'}]})
+        client=httpx.Client(transport=httpx.MockTransport(respond),event_hooks={'request':[llm.budget.before_request]})
+        llm.client=OpenAI(api_key='offline-test-key',base_url='https://api.groq.com/openai/v1',http_client=client,max_retries=1)
+        clock=[100.0]
+        def sleep(delay): clock[0]+=delay
+        try:
+            with patch('time.monotonic',lambda:clock[0]),patch('time.sleep',sleep),contextlib.redirect_stdout(io.StringIO()),contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(llm.call('test'),'Recovered')
+            self.assertEqual(len(calls),2)
+            self.assertEqual(len(llm.budget.entries),2)
+        finally: llm.close()
+
+
+if __name__ == '__main__': unittest.main()
