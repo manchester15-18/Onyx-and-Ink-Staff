@@ -14,7 +14,7 @@ if($('loginForm')){
 const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach the AI service/;
-let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0;
+let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0,signaturesReady=false;
 const busy=new Set();let inboxMessages=[],inboxNext=null,inboxVersion=0,readVersion=0,replyAttachments=[],composeAttachments=[],uploading=0;
 
 const isBad=a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted';
@@ -64,7 +64,7 @@ function render(){
   $('team').replaceChildren(...S.agents.map(a=>{const[st,txt]=agentState(a.name);const b=el('button','ag'+(a.name===agent?' sel':''));
     const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name+' · '+a.role),el('small','',txt));b.append(av,t);b.onclick=()=>{pickAgent(a.name);toggleChat(true)};return b}));
   $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
-  $('signatureList').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','Onyx & Ink'),el('small','',a.email+' · '+S.businessWebsite));return c}));
+  if(!signaturesReady){$('signatureList').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role));const input=el('textarea');input.dataset.signature=a.name;input.maxLength=1200;input.rows=6;input.value=S.signatures?.[a.name]||'';input.setAttribute('aria-label',a.name+' email signature');c.append(input);return c}));signaturesReady=true}
   $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
   renderOutbox();renderReports();renderFiles();
   const ws=S.integrations?.workspace||{},wsLabels={connected:'Connected'+(ws.account?' as '+ws.account:'')+' · Workspace actions are automatic',authorizing:'Waiting for Google sign-in…',failed:ws.message||'Workspace connection needs attention',not_connected:'Google Workspace sign-in needed'};
@@ -257,6 +257,9 @@ on('connectWorkspace','click',async()=>{try{$('workspaceNotice').textContent=(aw
 on('checkWorkspace','click',async()=>{$('checkWorkspace').disabled=true;try{$('workspaceNotice').textContent=(await api('workspace-check',{})).message;sig='';await refresh()}catch(e){$('workspaceNotice').textContent=e.message}finally{$('checkWorkspace').disabled=false}});
 on('saveCloudflare','click',async()=>{try{await api('cloudflare',{account:$('cfAccount').value.trim(),token:$('cfToken').value.trim(),freePlan:$('cfFree').checked});$('cfToken').value='';toast('Cloudflare credentials saved locally.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('testCloudflare','click',async()=>{$('testCloudflare').disabled=true;try{toast((await api('cloudflare-check',{})).message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('testCloudflare').disabled=false}});
+const signatureValues=()=>Object.fromEntries([...document.querySelectorAll('[data-signature]')].map(x=>[x.dataset.signature,x.value]));
+on('saveSignatures','click',async()=>{$('saveSignatures').disabled=true;try{const r=await api('signatures',{signatures:signatureValues()});toast(r.message);S.signatures=r.signatures}catch(e){toast(e.message,'bad')}finally{$('saveSignatures').disabled=false}});
+on('resetSignatures','click',async()=>{if(!await sure('Restore all four agent signatures to their defaults?'))return;try{const r=await api('signatures',{reset:true});S.signatures=r.signatures;signaturesReady=false;render();toast(r.message)}catch(e){toast(e.message,'bad')}});
 function renderFiles(){
   $('artifactList').replaceChildren(...(S.artifacts?.length?S.artifacts.map(f=>{const c=el('article','card artifact');c.append(el('b','',f.name),el('p','mut',f.agent+' · '+f.kind));
     const url='/api/artifact?id='+encodeURIComponent(f.file_id);if(f.kind==='design'){const img=el('img');img.src=url;img.alt=f.name;c.append(img)}const a=el('a','','Open / download');a.href=url;a.target='_blank';a.rel='noopener';c.append(a);return c}):[el('p','empty','Ask an agent to create a report or design.')]));

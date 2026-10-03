@@ -1,5 +1,6 @@
 """Named staff mailboxes, internal-only mail tools, and autonomous report delivery."""
 import os
+import json
 import re
 import smtplib
 import ssl
@@ -22,6 +23,39 @@ SIGNATURE_TITLES = {
 
 def valid_address(value):
     return bool(re.fullmatch(r"[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+", value)) and value.isascii()
+
+
+def default_signatures(addresses,website='https://onyxandink.org'):
+    website=(website or 'https://onyxandink.org').strip().rstrip('/')
+    return {name:f'{name}\n{SIGNATURE_TITLES[name]}\nOnyx & Ink\n{addresses.get(name,"")} | {website}' for name in STAFF}
+
+
+def validate_signatures(values):
+    if not isinstance(values,dict) or set(values)!=set(STAFF):raise ValueError('Provide one signature for each agent.')
+    cleaned={}
+    for name in STAFF:
+        value=values[name]
+        if not isinstance(value,str) or not value.strip() or len(value)>1200 or '\x00' in value:raise ValueError('Each signature must contain 1–1,200 characters.')
+        cleaned[name]=value.replace('\r\n','\n').replace('\r','\n').strip()
+    return cleaned
+
+
+def signature_settings(project_dir,addresses,website='https://onyxandink.org'):
+    defaults=default_signatures(addresses,website);path=Path(project_dir)/'work'/'email-signatures.json'
+    try:return validate_signatures(json.loads(path.read_text()))
+    except (OSError,ValueError,TypeError):return defaults
+
+
+def save_signature_settings(project_dir,values):
+    values=validate_signatures(values);path=Path(project_dir)/'work'/'email-signatures.json';path.parent.mkdir(exist_ok=True)
+    temp=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_text(json.dumps(values,indent=2));temp.chmod(0o600);temp.replace(path);return values
+
+
+def reset_signature_settings(project_dir,addresses,website='https://onyxandink.org'):
+    path=Path(project_dir)/'work'/'email-signatures.json'
+    try:path.unlink()
+    except FileNotFoundError:pass
+    return default_signatures(addresses,website)
 
 
 class StaffMail:
@@ -87,7 +121,7 @@ class StaffMail:
             from google_mail_auth import GoogleMailAuth
             oauth = GoogleMailAuth(project_dir, get('GOOGLE_MAIL_USER', ''))
         website=(get('BUSINESS_WEBSITE') or 'https://onyxandink.org').strip().rstrip('/')
-        signatures={name:f'{name}\n{SIGNATURE_TITLES[name]}\nOnyx & Ink\n{addresses[name]} | {website}' for name in STAFF}
+        signatures=signature_settings(project_dir,addresses,website)
         return cls(project_dir, (mode or get('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
                    get('SMTP_HOST', ''), port, get('SMTP_SECURITY', 'starttls'), credentials,
                    team_updates=get('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',

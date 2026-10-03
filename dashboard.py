@@ -19,7 +19,7 @@ from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dotenv import dotenv_values, set_key
 from dashboard_mail import Mailbox
-from staff_email import StaffMail
+from staff_email import StaffMail,signature_settings,save_signature_settings,reset_signature_settings
 from delivery_tracking import check_delivery
 from inbox_state import InboxState
 
@@ -163,8 +163,10 @@ def snapshot():
     for item in artifacts:
         if item['kind']=='report':
             reports.append({'name':item['name'],'agent':item['agent'],'body':clean(tools.file(item['file_id']).read_text()[:50000])})
+    addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
     return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare')},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),
+        'signatures':signature_settings(ROOT,addresses,website),
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
 
@@ -284,6 +286,12 @@ class Handler(BaseHTTPRequestHandler):
                     status={'state':'connected','checked':datetime.now(timezone.utc).isoformat(),'message':'Live image generation verified.'}
                     path=ROOT/'work'/'cloudflare-status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(status));temp.chmod(0o600);temp.replace(path)
                     return self.reply(200,{'message':'Cloudflare image generation verified. The test image is in Created files.','file':result.get('file_id')})
+                elif self.path=='/api/signatures':
+                    config=dotenv_values(ROOT/'.env');addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
+                    values=reset_signature_settings(ROOT,addresses,website) if data.get('reset') is True else save_signature_settings(ROOT,data.get('signatures'))
+                    if monitor_active():
+                        stop_monitor();start_monitor();set_desired(True)
+                    return self.reply(200,{'message':'Agent signatures restored.' if data.get('reset') is True else 'Agent signatures saved.','signatures':values})
                 elif self.path=='/api/smtp-check':
                     import smtplib
                     config=dotenv_values(ROOT/'.env');mail=mail_from_config(config,mode='send')

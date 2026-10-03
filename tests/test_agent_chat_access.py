@@ -7,8 +7,33 @@ from email.message import Message
 from agent_chat import AgentChat, TelegramBridge
 from dashboard_access import Access, setup
 import threading
+import time
 
 class ChatAccessTests(unittest.TestCase):
+    def test_plain_chat_skips_tools_and_action_request_uses_them(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
+            chat=AgentChat(root);chat.llm=Mock();chat.llm.call.return_value='A focused answer.';chat.act=Mock(return_value='Report saved.')
+            plain=chat.ask('Morgan','Help me prioritize the Christmas launch.','aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+            self.assertEqual(plain,'A focused answer.');chat.act.assert_not_called()
+            action=chat.ask('Morgan','Create a launch report with the next steps.','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
+            self.assertEqual(action,'Report saved.');chat.act.assert_called_once()
+
+    def test_slow_agent_does_not_block_another_agent_chat(self):
+        class ConcurrentLLM:
+            def __init__(self):self.active=0;self.maximum=0;self.lock=threading.Lock()
+            def call(self,messages):
+                with self.lock:self.active+=1;self.maximum=max(self.maximum,self.active)
+                time.sleep(.08)
+                with self.lock:self.active-=1
+                return 'Done'
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\n')
+            chat=AgentChat(root);chat.llm=ConcurrentLLM();results=[]
+            threads=[threading.Thread(target=lambda a=a,r=r:results.append(chat.ask(a,'Give me one idea.',r))) for a,r in [('Morgan','cccccccc-cccc-cccc-cccc-cccccccccccc'),('Avery','dddddddd-dddd-dddd-dddd-dddddddddddd')]]
+            for thread in threads:thread.start()
+            for thread in threads:thread.join()
+            self.assertEqual(results,['Done','Done']);self.assertEqual(chat.llm.maximum,2)
     def test_shared_history_idempotency_and_secret_redaction(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test-private-secret\n')

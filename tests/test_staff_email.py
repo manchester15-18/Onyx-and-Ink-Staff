@@ -5,12 +5,20 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from email import policy
 from email.parser import BytesParser
-from staff_email import StaffMail, STAFF
+from staff_email import StaffMail, STAFF,default_signatures,save_signature_settings,signature_settings,reset_signature_settings
 
 ADDRESSES={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
 
 
 class StaffMailTests(unittest.TestCase):
+    def test_signature_settings_save_and_restore_privately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            custom={name:name+' custom signature' for name in STAFF}
+            save_signature_settings(directory,custom);path=Path(directory)/'work/email-signatures.json'
+            self.assertEqual(path.stat().st_mode & 0o777,0o600);self.assertEqual(signature_settings(directory,ADDRESSES),custom)
+            restored=reset_signature_settings(directory,ADDRESSES);self.assertEqual(restored,default_signatures(ADDRESSES));self.assertFalse(path.exists())
+            with self.assertRaises(ValueError):save_signature_settings(directory,{'Morgan':'missing others'})
+
     def test_environment_builds_official_agent_signature(self):
         with tempfile.TemporaryDirectory() as directory:
             config={'STAFF_EMAIL_MODE':'draft','MORGAN_EMAIL':'coo@example.com','AVERY_EMAIL':'marketing@example.com','JORDAN_EMAIL':'it@example.com','CAMERON_EMAIL':'hr@example.com','OWNER_EMAIL':'ceo@example.com','OWNER_BCC_EMAIL':'ceo@example.com','BUSINESS_WEBSITE':'https://onyxandink.org'}
