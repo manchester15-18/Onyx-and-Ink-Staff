@@ -116,8 +116,13 @@ def main():
             if not response.ok or not allowed_account(account,expected):raise ValueError()
         workspace.save(creds);save_status(root,'connected',account,'Authorization verified with Google Drive.')
         print('Workspace authorized. Mail authorization is unchanged.');return 0
-    except Exception:
-        save_status(root,'failed',message='Google authorization was not saved. Check the Desktop client, selected account, enabled APIs, and consent policy.')
+    except Exception as error:
+        if isinstance(error,TimeoutError):reason='Google sign-in timed out before approval completed.'
+        elif isinstance(error,ValueError):reason='Google returned an invalid authorization, or the selected account was outside the configured Workspace domain.'
+        elif isinstance(error,OSError):reason='The local Google sign-in callback could not start or complete.'
+        elif isinstance(error,requests.RequestException):reason='Google Drive could not verify the authorized account. Check that the Drive API is enabled.'
+        else:reason='Google authorization was not saved. Check the OAuth consent policy and enabled Workspace APIs.'
+        save_status(root,'failed',message=reason)
         print('Workspace setup failed. Check the Desktop client, selected Workspace account, enabled APIs, and consent policy. No new authorization saved.');return 1
 
 if __name__=='__main__':raise SystemExit(main())
