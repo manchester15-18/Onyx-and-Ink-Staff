@@ -22,6 +22,17 @@ class ChatAccessTests(unittest.TestCase):
             chat.ask('Morgan','Next step','telegram:42',source='telegram')
             self.assertEqual(AgentChat(root).history('Morgan')[-1]['source'],'telegram')
             with self.assertRaises(ValueError):chat.history('CEO')
+    def test_email_draft_uses_one_plain_model_call_without_tools(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test-private-secret\nOWNER_EMAIL=ceo@onyxandink.org\n')
+            chat=AgentChat(root);chat.draft_llm=Mock();chat.draft_llm.call.return_value='Hello,\n\nThanks for writing.\n\nMorgan'
+            answer=chat.draft_reply('Morgan','Reply to this customer question.')
+            self.assertEqual(answer,'Hello,\n\nThanks for writing.\n\nMorgan')
+            chat.draft_llm.call.assert_called_once()
+            messages=chat.draft_llm.call.call_args.args[0]
+            self.assertIn('ceo@onyxandink.org',messages[0]['content'])
+            self.assertNotIn('JSON object',messages[0]['content'])
+            self.assertEqual(chat.history('Morgan'),[])
     def test_wifi_requires_password_session_and_preserves_setup(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);setup(root,['10.0.0.20']);access=Access(root)

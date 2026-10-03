@@ -43,6 +43,25 @@ CHAT = AgentChat(ROOT)
 TELEGRAM = TelegramBridge(ROOT,CHAT,STOP)
 
 
+def provider_status(name):
+    try:return json.loads((ROOT/'work'/(name+'-status.json')).read_text())
+    except (OSError,ValueError):return {}
+
+
+def workspace_status():
+    if WORKSPACE_SETUP and WORKSPACE_SETUP.poll() is None:
+        return {'state':'authorizing','message':'Google sign-in is open on this Mac.'}
+    token=ROOT/'work'/'google-workspace-token.json';saved=provider_status('workspace')
+    if not token.exists():
+        return saved if saved.get('state')=='failed' else {'state':'not_connected','message':'Google Workspace sign-in needed.'}
+    try:
+        from google.oauth2.credentials import Credentials
+        credentials=Credentials.from_authorized_user_file(str(token))
+        if not credentials.refresh_token:raise ValueError()
+        return {'state':'connected','account':saved.get('account',''),'checked':saved.get('checked',''),'message':saved.get('message','Authorization saved locally.')}
+    except Exception:return {'state':'failed','message':'Saved Workspace authorization needs renewal.'}
+
+
 def monitor_active():
     path = ROOT/'work'/'inbox-monitor.lock'
     if not path.exists(): return False
@@ -142,7 +161,7 @@ def snapshot():
     for item in artifacts:
         if item['kind']=='report':
             reports.append({'name':item['name'],'agent':item['agent'],'body':clean(tools.file(item['file_id']).read_text()[:50000])})
-    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':(ROOT/'work'/'google-workspace-token.json').exists(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true'},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
+    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare')},'mode':config.get('STAFF_EMAIL_MODE','off'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
@@ -220,6 +239,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=='/api/chat-history':return self.reply(200,{'messages':CHAT.history(data.get('agent','Morgan'))})
             if self.path=='/api/chat':
                 return self.reply(200,{'answer':CHAT.ask(data.get('agent','Morgan'),str(data.get('body','')),str(data.get('requestId','')))})
+            if self.path=='/api/draft-reply':
+                return self.reply(200,{'answer':CHAT.draft_reply(data.get('agent','Morgan'),str(data.get('body','')))})
             with LOCK:
                 if self.path=='/api/wifi-password':
                     if self.client_address[0] not in ('127.0.0.1','::1'):return self.reply(403,{'error':'View the Wi-Fi password on the host Mac.'})
@@ -239,6 +260,12 @@ class Handler(BaseHTTPRequestHandler):
                     with (ROOT/'work'/'workspace-setup.log').open('ab') as output:
                         WORKSPACE_SETUP=subprocess.Popen([sys.executable,'-u',str(ROOT/'workspace_tools.py'),'--authorize'],cwd=ROOT,stdout=output,stderr=output)
                     return self.reply(200,{'message':'Google sign-in is opening on this Mac. Select the shared Workspace account and review the requested access.'})
+                elif self.path=='/api/workspace-check':
+                    from workspace_tools import Workspace,save_status
+                    result=Workspace(ROOT).request('GET','https://www.googleapis.com/drive/v3/about',params={'fields':'user(emailAddress)'})
+                    account=result.get('user',{}).get('emailAddress','')
+                    save_status(ROOT,'connected',account,'Connection verified with Google Drive.')
+                    return self.reply(200,{'message':'Google Workspace connection verified.'})
                 elif self.path=='/api/cloudflare':
                     if self.client_address[0] not in ('127.0.0.1','::1'):return self.reply(403,{'error':'Configure provider credentials on the host Mac.'})
                     import re
@@ -249,6 +276,12 @@ class Handler(BaseHTTPRequestHandler):
                     set_key(str(ROOT/'.env'),'CLOUDFLARE_FREE_PLAN_CONFIRMED','true' if data.get('freePlan') is True else 'false',quote_mode='never')
                     (ROOT/'.env').chmod(0o600)
                     return self.reply(200,{'ok':True})
+                elif self.path=='/api/cloudflare-check':
+                    result=Actions(ROOT,'Jordan','cloudflare-check-'+secrets.token_hex(8)).execute('design',{'prompt':'Minimal black and gold Onyx and Ink connection test icon on a plain white background, no text','model':'schnell'})
+                    if result.get('error'):raise RuntimeError(result['error'])
+                    status={'state':'connected','checked':datetime.now(timezone.utc).isoformat(),'message':'Live image generation verified.'}
+                    path=ROOT/'work'/'cloudflare-status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(status));temp.chmod(0o600);temp.replace(path)
+                    return self.reply(200,{'message':'Cloudflare image generation verified. The test image is in Created files.','file':result.get('file_id')})
                 elif self.path=='/api/smtp-check':
                     import smtplib
                     config=dotenv_values(ROOT/'.env');mail=mail_from_config(config,mode='send')

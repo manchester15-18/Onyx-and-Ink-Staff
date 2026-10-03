@@ -9,6 +9,11 @@ from email.message import EmailMessage
 import dashboard
 
 class DashboardTests(unittest.TestCase):
+    def test_workspace_status_distinguishes_failed_authorization(self):
+        with tempfile.TemporaryDirectory() as d,patch.object(dashboard,'ROOT',Path(d)),patch.object(dashboard,'WORKSPACE_SETUP',None):
+            work=Path(d)/'work';work.mkdir();(work/'workspace-status.json').write_text('{"state":"failed","message":"Sign-in failed."}')
+            self.assertEqual(dashboard.workspace_status()['state'],'failed')
+
     def test_inbox_query_string_serves_page(self):
         handler=dashboard.Handler.__new__(dashboard.Handler);handler.client_address=('127.0.0.1',1);handler.connection=None
         handler.headers=Message();handler.headers['Host']='127.0.0.1:8765'

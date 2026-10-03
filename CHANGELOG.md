@@ -44,3 +44,17 @@
 - Updated tests/test_inbox_revamp.py (`tests/test_inbox_revamp.py`).
 
 <!-- backup 5a0fc7bf04194de3cfba37b8f1735a97345a4ee6824d461a77c0dc0d468db063 -->
+
+## 2026-10-03 19:30 EDT — Application update
+
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated groq_llm.py (`groq_llm.py`).
+- Updated tests/test_agent_chat_access.py (`tests/test_agent_chat_access.py`).
+- Updated tests/test_dashboard.py (`tests/test_dashboard.py`).
+- Updated tests/test_workspace_tools.py (`tests/test_workspace_tools.py`).
+- Updated workspace_tools.py (`workspace_tools.py`).
+
+<!-- backup 9c81592fffe7a4e86c5d9d3b410da451f1ecae8176c24babb23ad04ebbf9b1d3 -->

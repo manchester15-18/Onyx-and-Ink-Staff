@@ -11,6 +11,15 @@ from dotenv import dotenv_values
 
 SCOPES=['https://www.googleapis.com/auth/drive.file','https://www.googleapis.com/auth/calendar.events.owned']
 
+def allowed_account(account,expected):
+    account=(account or '').lower();expected=(expected or '').lower()
+    return bool(account and expected and (account==expected or account.rpartition('@')[2]==expected.rpartition('@')[2]))
+
+def save_status(root,state,account='',message=''):
+    path=Path(root)/'work'/'workspace-status.json';path.parent.mkdir(exist_ok=True)
+    data={'state':state,'account':account,'message':message,'checked':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
+    temp=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_text(json.dumps(data));temp.chmod(0o600);temp.replace(path)
+
 class Workspace:
     def __init__(self,root):self.root=Path(root);self.path=self.root/'work'/'google-workspace-token.json'
     def save(self,credentials):
@@ -100,8 +109,15 @@ def main():
         # Confirm the same Workspace identity without printing private profile data.
         with AuthorizedSession(creds) as session:
             response=session.get('https://www.googleapis.com/drive/v3/about',params={'fields':'user(emailAddress)'},timeout=30)
-            if not response.ok or response.json().get('user',{}).get('emailAddress','').lower()!=cfg.get('GOOGLE_MAIL_USER','').lower():raise ValueError()
-        workspace.save(creds);print('Workspace authorized. Mail authorization is unchanged.');return 0
-    except Exception:print('Workspace setup failed. Check the Desktop client, selected Workspace account, enabled APIs, and consent policy. No new authorization saved.');return 1
+            account=response.json().get('user',{}).get('emailAddress','').lower()
+            expected=cfg.get('GOOGLE_WORKSPACE_USER') or cfg.get('GOOGLE_MAIL_USER','')
+            expected=expected.lower()
+            # Google reports the primary Workspace account even when login_hint is an alias.
+            if not response.ok or not allowed_account(account,expected):raise ValueError()
+        workspace.save(creds);save_status(root,'connected',account,'Authorization verified with Google Drive.')
+        print('Workspace authorized. Mail authorization is unchanged.');return 0
+    except Exception:
+        save_status(root,'failed',message='Google authorization was not saved. Check the Desktop client, selected account, enabled APIs, and consent policy.')
+        print('Workspace setup failed. Check the Desktop client, selected Workspace account, enabled APIs, and consent policy. No new authorization saved.');return 1
 
 if __name__=='__main__':raise SystemExit(main())
