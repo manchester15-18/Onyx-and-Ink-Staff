@@ -47,7 +47,7 @@ class RequestBudget:
 class GroqLLM(OpenAICompletion):
     """Use the installed native client, without LiteLLM or Gemini dependencies."""
 
-    def __init__(self, api_key, model="openai/gpt-oss-120b", rpm=25, tpm=7000, max_tokens=1500, timeout=60, max_retries=3):
+    def __init__(self, api_key, model="qwen/qwen3.8-27b", rpm=25, tpm=7000, max_tokens=1500, timeout=60, max_retries=3):
         model = model.removeprefix("groq/")
         self.budget = RequestBudget(rpm, tpm)
         http_client = httpx.Client(event_hooks={"request": [self.budget.before_request]})
@@ -89,6 +89,12 @@ class GroqLLM(OpenAICompletion):
             extra_body = dict(params.get("extra_body") or {})
             extra_body["include_reasoning"] = False
             params["extra_body"] = extra_body
+            if tools:
+                params["parallel_tool_calls"] = False
+        elif self.model.startswith("qwen/qwen3"):
+            # Instruct mode produces direct visible content and avoids the
+            # reasoning-only responses that GPT-OSS can return to CrewAI.
+            params["reasoning_effort"] = "none"
             if tools:
                 params["parallel_tool_calls"] = False
         return params

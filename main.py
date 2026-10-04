@@ -16,6 +16,7 @@ from crewai import Agent, Crew, Process, Task
 from crewai.tools import tool
 from crewai_tools import SerperDevTool
 from openai import APIConnectionError, APIStatusError
+import requests
 from groq_llm import GroqLLM
 from staff_email import StaffMail
 
@@ -67,6 +68,29 @@ def positive_int(name, default):
     if value <= 0:
         raise ValueError(f"{name} must be a positive whole number.")
     return value
+
+
+def verified_search_key(search_key):
+    """Reject unusable Serper credentials before agents enter a tool loop."""
+    if not search_key:
+        return None
+    try:
+        response = requests.post(
+            "https://google.serper.dev/search",
+            headers={"X-API-KEY": search_key},
+            json={"q": "Onyx and Ink custom gifts", "num": 1},
+            timeout=15,
+        )
+    except requests.RequestException:
+        print("Web search disabled for this run: Serper could not be reached. The agents will label research needs and continue.")
+        return None
+    if response.status_code in (401, 403):
+        print("Web search disabled for this run: Serper rejected the configured API key. Replace SERPER_API_KEY to restore research; the agents will continue without it.")
+        return None
+    if not response.ok:
+        print(f"Web search disabled for this run: Serper returned HTTP {response.status_code}. The agents will continue without it.")
+        return None
+    return search_key
 
 
 def build_crew(llm, search_key=None, verbose=False, mail=None):
@@ -125,15 +149,17 @@ def main(argv=None):
         key = credential("GROQ_API_KEY")
         search_key = credential("SERPER_API_KEY", required=False)
         llm = GroqLLM(
-            key, model=os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"),
+            key, model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
             rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 7000),
             max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1500),
         )
+        if not args.check:
+            search_key = verified_search_key(search_key)
         crew = build_crew(llm, search_key, args.verbose, mail)
         inputs = {"directive": args.directive, "report_dir": str(PROJECT_DIR / "reports")}
         if args.check:
             crew._interpolate_inputs(inputs)
-            print(f"Setup OK: Groq model {llm.model}, four agents, four tasks. Web search: {'enabled' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
+            print(f"Setup OK: Groq model {llm.model}, four agents, four tasks. Web search: {'configured (not verified)' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
             return 0
         print(f"Running Onyx and Ink staff on Groq ({llm.model}). Free-tier pacing may pause between requests.")
         result = crew.kickoff(inputs=inputs)

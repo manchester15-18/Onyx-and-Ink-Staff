@@ -1,13 +1,13 @@
 # Onyx and Ink Staff — Groq
 
-This project uses **Groq**, not xAI's **Grok**. Its default model is `openai/gpt-oss-120b`, served by Groq. The OpenAI-compatible Python client sends requests only to `https://api.groq.com/openai/v1`; an OpenAI API key is not required. No Gemini or LangChain integration remains in the active code.
+This project uses **Groq**, not xAI's **Grok**. Its default model is `qwen/qwen3.8-27b`, served by Groq in instruct mode for reliable visible CrewAI responses. The OpenAI-compatible Python client sends requests only to `https://api.groq.com/openai/v1`; an OpenAI API key is not required. No Gemini or LangChain integration remains in the active code.
 
 ## Get your keys
 
 1. Sign in or create an account at https://console.groq.com.
 2. Open https://console.groq.com/keys, select **Create API Key**, and name it `Onyx and Ink Staff`.
 3. Copy the key into the existing `.env` file after `GROQ_API_KEY=`. Paste it without quotes or spaces. Never paste keys into chat.
-4. Keep `GROQ_MODEL=openai/gpt-oss-120b`. Check model access and actual account limits at https://console.groq.com/settings/limits. Use the Free plan if you want to avoid paid usage; don't enable paid billing for this setup.
+4. Keep `GROQ_MODEL=qwen/qwen3.8-27b`. Check model access and actual account limits at https://console.groq.com/settings/limits. Use the Free plan if you want to avoid paid usage; don't enable paid billing for this setup.
 5. Your existing `SERPER_API_KEY` is preserved. Serper provides optional web research; obtain a key at https://serper.dev if needed. Leave the value blank to disable search. Serper has its own usage allowance.
 
 Do not overwrite your existing `.env` with `.env.example`: the example contains blank keys. Old Gemini keys can remain in `.env`; the rewritten code does not use them. `.env` is excluded from Git.

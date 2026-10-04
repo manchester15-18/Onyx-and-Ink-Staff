@@ -7,7 +7,7 @@ import socket
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('CREWAI_TELEMETRY_DISABLED', 'true')
@@ -41,6 +41,13 @@ class GroqTests(unittest.TestCase):
                 main.credential('GROQ_API_KEY')
             self.assertNotIn('secret', str(error.exception))
 
+    def test_invalid_serper_key_disables_search_without_stopping_run(self):
+        response=Mock(status_code=403,ok=False)
+        with patch('main.requests.post',return_value=response),contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertIsNone(main.verified_search_key('private-test-key'))
+        self.assertIn('Serper rejected',output.getvalue())
+        self.assertNotIn('private-test-key',output.getvalue())
+
     def test_inventory(self):
         with contextlib.redirect_stdout(io.StringIO()):
             result = main.check_blank_stock.run(item_names=['shirts', 'tumblers', 'missing'])
@@ -67,9 +74,8 @@ class GroqTests(unittest.TestCase):
         def respond(request):
             self.assertEqual(request.url.host, 'api.groq.com')
             payload = json.loads(request.content)
-            self.assertEqual(payload['model'], 'openai/gpt-oss-120b')
-            self.assertEqual(payload['reasoning_effort'], 'low')
-            self.assertFalse(payload['include_reasoning'])
+            self.assertEqual(payload['model'], 'qwen/qwen3.8-27b')
+            self.assertEqual(payload['reasoning_effort'], 'none')
             self.assertNotIn('stop', payload)
             calls.append(payload)
             content = (

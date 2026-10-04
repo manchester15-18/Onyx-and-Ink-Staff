@@ -231,7 +231,7 @@ def main(argv=None):
         user=mail.oauth.user if mail.oauth else os.getenv('IMAP_USER') or os.getenv('SMTP_USER','')
         password=os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD','')
         interval=positive_int('INBOX_POLL_SECONDS',60)
-        llm=GroqLLM(credential('GROQ_API_KEY'),model=os.getenv('GROQ_MODEL','openai/gpt-oss-120b'),
+        llm=GroqLLM(credential('GROQ_API_KEY'),model=os.getenv('GROQ_MODEL','qwen/qwen3.8-27b'),
                     rpm=positive_int('GROQ_RPM',25),tpm=positive_int('GROQ_TPM',7000),max_tokens=positive_int('GROQ_MAX_COMPLETION_TOKENS',1500))
         monitor=InboxMonitor(PROJECT_DIR,mail,lambda staff,message,body:generate_reply(llm,staff,message,body),user,password,
                              host=os.getenv('IMAP_HOST','imap.gmail.com'),limit=positive_int('INBOX_BATCH_LIMIT',5),oauth=mail.oauth)

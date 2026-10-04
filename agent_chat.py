@@ -63,7 +63,7 @@ class AgentChat:
                 except ValueError:max_tokens=1200
                 try:rpm=max(1,min(100,int(cfg.get('GROQ_RPM','25'))));tpm=max(2000,min(100000,int(cfg.get('GROQ_TPM','7000'))))
                 except ValueError:rpm,tpm=25,7000
-                self.llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','openai/gpt-oss-120b'),rpm=rpm,tpm=tpm,max_tokens=max_tokens,timeout=45,max_retries=1)
+                self.llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','qwen/qwen3.8-27b'),rpm=rpm,tpm=tpm,max_tokens=max_tokens,timeout=45,max_retries=1)
             return self.llm
 
     @staticmethod
@@ -94,7 +94,7 @@ class AgentChat:
                 if self.draft_llm is None:
                     from groq_llm import GroqLLM
                     if not cfg.get('GROQ_API_KEY'):raise RuntimeError()
-                    self.draft_llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','openai/gpt-oss-120b'),max_tokens=600,timeout=30,max_retries=1)
+                    self.draft_llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','qwen/qwen3.8-27b'),max_tokens=600,timeout=30,max_retries=1)
                 answer=str(self.draft_llm.call(messages))[:8000].strip()
             except Exception:raise RuntimeError('The drafting service did not respond. Try again after the Groq limit resets.') from None
         for key,value in cfg.items():
