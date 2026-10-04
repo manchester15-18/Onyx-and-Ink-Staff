@@ -99,8 +99,8 @@ class GroqTests(unittest.TestCase):
                 result = crew.kickoff(inputs={'directive':'Test gift launch','report_dir':directory})
                 self.assertEqual(mail.count,3)  # Handoffs only until the run finishes.
                 mail.finish()
-                self.assertEqual(mail.count,7)  # Four end-of-run reports.
-                self.assertEqual(len(list(mail.outbox.glob('*.eml'))),7)
+                self.assertEqual(mail.count,3)  # Routine reports stay in the dashboard.
+                self.assertEqual(len(list(mail.outbox.glob('*.eml'))),3)
                 self.assertEqual(len(calls),5)
                 self.assertIn("240 units", json.dumps(calls[1]["messages"]))
                 for name in ['marketing_campaign.md','web_dev_specs.md','legal_terms.md','operational_plan.md']:

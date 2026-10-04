@@ -187,3 +187,20 @@
 - Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
 
 <!-- backup 37829ac2ca78f049c2cba6162710099cc9b2aa0ccd122bc452073ed44a0fb901 -->
+
+## 2026-10-04 19:44 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated inbox_monitor.py (`inbox_monitor.py`).
+- Updated main.py (`main.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
+- Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
+
+<!-- backup 430a04917753840469b5d8a3502965b38a79509f416c03b1b44f8f98dc3d2b87 -->

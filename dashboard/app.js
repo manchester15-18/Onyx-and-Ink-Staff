@@ -43,7 +43,7 @@ function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S
   if(!S.authorized)items.push(['need','Google sign-in needed','Run google_mail_auth.py on the Mac.','settings']);
   if(S.enabled&&!S.monitor)items.push(['need','Monitor is not running','Background monitoring is enabled but stopped.','settings']);
   if(bad)items.push(['need',bad+' send'+(bad>1?'s':'')+' unconfirmed','Review and dismiss, or check delivery.','activity']);
-  if(drafts)items.push(['w',drafts+' draft'+(drafts>1?'s':'')+' to approve','Nothing is sent until you approve.','activity']);
+  if(drafts)items.push(['w',drafts+' outside draft'+(drafts>1?'s':'')+' to approve','These messages are not sent until you approve.','activity']);
   return items}
 
 /* ---------- rendering ---------- */
@@ -55,6 +55,7 @@ function render(){
   $('modeNote').textContent=S.internalMode==='send'?'Staff + CEO automatic · outside mail follows this mode':'All mail follows this mode';
   $('monitor').textContent=S.monitor?'Running':'Stopped';$('monitorNote').textContent=S.monitor?(S.enabled?'Background monitoring enabled':'Monitor running'):'Start in Settings';
   $('google').textContent=S.authorized?'Authorized':'Setup needed';$('monitorLine').textContent=S.monitor?'Running':'Stopped';
+  $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
   $('saveMode').disabled=S.monitor;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
   const items=attention();$('attnCount').textContent=items.length;

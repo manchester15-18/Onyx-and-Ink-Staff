@@ -34,7 +34,7 @@ class StaffMailTests(unittest.TestCase):
             mail.report_callback('Avery')(SimpleNamespace(raw='Campaign report'))
             mail.finish()
             files=list(mail.outbox.glob('*.eml'))
-            self.assertEqual(len(files),2)
+            self.assertEqual(len(files),1)
             msg=BytesParser(policy=policy.default).parsebytes(files[0].read_bytes())
             self.assertIn('avery@example.com',str(msg['From']))
             self.assertIn('jordan@example.com',str(msg['To']))
@@ -42,16 +42,16 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn('Campaign report',msg.get_body(preferencelist=('plain',)).get_content())
             smtp.assert_not_called()
 
-    def test_callbacks_do_not_duplicate_and_coo_copies_team(self):
+    def test_callbacks_do_not_duplicate_and_routine_reports_stay_in_dashboard(self):
         with tempfile.TemporaryDirectory() as directory:
             mail=StaffMail(directory,'draft',ADDRESSES)
-            callback=mail.report_callback('Morgan')
+            callback=mail.report_callback('Avery')
             callback(SimpleNamespace(raw='Plan')); callback(SimpleNamespace(raw='Plan'))
             mail.finish(); mail.finish()
             self.assertEqual(mail.count,1)
             msg=BytesParser(policy=policy.default).parsebytes(next(mail.outbox.glob('*.eml')).read_bytes())
-            for name in ['Owner','Avery','Jordan','Cameron']:
-                self.assertIn(ADDRESSES[name],str(msg['To']))
+            self.assertIn(ADDRESSES['Jordan'],str(msg['To']));self.assertIn(ADDRESSES['Morgan'],str(msg['To']))
+            self.assertNotIn(ADDRESSES['Owner'],str(msg['To']))
 
     def test_rejects_external_recipient_injection_and_limits(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -73,7 +73,7 @@ class StaffMailTests(unittest.TestCase):
             client.starttls.assert_called_once()
             client.login.assert_called_once_with('account@example.com','local-test-password')
             self.assertEqual(client.send_message.call_args.kwargs['from_addr'],'jordan@example.com')
-            self.assertEqual(client.send_message.call_args.kwargs['to_addrs'],['morgan@example.com','private@example.com'])
+            self.assertEqual(client.send_message.call_args.kwargs['to_addrs'],['morgan@example.com'])
             self.assertIn('accepted',result)
             self.assertEqual(next(mail.outbox.glob('*.status')).read_text().strip(),'accepted')
 
@@ -81,12 +81,14 @@ class StaffMailTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP') as smtp:
             client=MagicMock();client.send_message.return_value={};smtp.return_value=client;client.__enter__.return_value=client
             creds={name:('account@example.com','local-test-password') for name in STAFF}
-            mail=StaffMail(directory,'draft',ADDRESSES,'smtp.example.com',587,'starttls',creds,bcc='private@example.com',internal_mode='send')
-            internal=mail.deliver('Avery',['Owner'],'Question','## Launch question\n\n**Approve** the bundle?\n\n- Tumbler\n- Pen')
+            mail=StaffMail(directory,'draft',ADDRESSES,'smtp.example.com',587,'starttls',creds,bcc='private@example.com',internal_mode='send',important_cc='backup@example.com')
+            internal=mail.deliver('Avery',['Owner'],'Question','## Launch question\n\n**Approve** the bundle?\n\n- Tumbler\n- Pen',important=True)
             external=mail.deliver('Avery',['Owner'],'Customer note','Please review',kind='compose',reply_address='customer@example.com')
             self.assertIn('accepted',internal);self.assertIn('drafted locally',external);self.assertEqual(client.send_message.call_count,1)
             message=BytesParser(policy=policy.default).parsebytes((mail.outbox/'01-avery.eml').read_bytes())
             plain=message.get_body(preferencelist=('plain',)).get_content();rich=message.get_body(preferencelist=('html',)).get_content()
+            self.assertEqual(message['Cc'],'backup@example.com');self.assertEqual(message['Bcc'],'private@example.com')
+            self.assertEqual(client.send_message.call_args_list[0].kwargs['to_addrs'],['owner@example.com','backup@example.com','private@example.com'])
             self.assertNotIn('##',plain);self.assertNotIn('**',plain);self.assertIn('• Tumbler',plain)
             self.assertIn('<h3',rich);self.assertIn('<strong>Approve</strong>',rich);self.assertIn('<ul',rich)
 

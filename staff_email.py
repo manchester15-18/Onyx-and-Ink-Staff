@@ -117,7 +117,7 @@ def markdown_to_html(value):
 class StaffMail:
     def __init__(self, project_dir, mode='off', addresses=None, host='', port=587,
                  security='starttls', credentials=None, limit=12, team_updates=True, bcc='', oauth=None,
-                 signatures=None, internal_mode=None):
+                 signatures=None, internal_mode=None, important_cc=''):
         if mode not in ('off', 'draft', 'send'):
             raise ValueError('STAFF_EMAIL_MODE must be off, draft, or send.')
         internal_mode = ('draft' if mode == 'off' else mode) if internal_mode is None else internal_mode
@@ -132,6 +132,7 @@ class StaffMail:
         self.limit, self.count = limit, 0
         self.team_updates = team_updates
         self.bcc = bcc
+        self.important_cc = important_cc
         self.signatures = signatures or {}
         self.run_id = uuid.uuid4().hex
         self.outbox = Path(project_dir) / 'work' / 'email-outbox' / self.run_id
@@ -143,6 +144,8 @@ class StaffMail:
             return
         if bcc and not valid_address(bcc):
             raise ValueError('Set a valid OWNER_BCC_EMAIL address.')
+        if important_cc and not valid_address(important_cc):
+            raise ValueError('Set a valid IMPORTANT_CC_EMAIL address.')
         for name in (*STAFF, 'Owner'):
             if not valid_address(self.addresses.get(name, '')):
                 raise ValueError(f'Set a valid {name.upper()}_EMAIL address before enabling staff email.')
@@ -186,9 +189,10 @@ class StaffMail:
                    get('SMTP_HOST', ''), port, get('SMTP_SECURITY', 'starttls'), credentials,
                    team_updates=get('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
                    bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth, signatures=signatures,
-                   internal_mode=get('STAFF_INTERNAL_EMAIL_MODE','draft').lower())
+                   internal_mode=get('STAFF_INTERNAL_EMAIL_MODE','draft').lower(),
+                   important_cc=get('IMPORTANT_CC_EMAIL',''))
 
-    def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None):
+    def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None, important=False):
         if self.mode == 'off':
             return 'Staff email is disabled.'
         if sender not in STAFF and not (sender in ('Owner', 'Shared') and kind in ('manual', 'compose')):
@@ -213,8 +217,11 @@ class StaffMail:
         label = {'Owner':'CEO', 'Shared':'Shared inbox'}.get(sender,sender)
         message['From'] = formataddr((f'{label} | Onyx and Ink', self.addresses[sender]))
         message['To'] = reply_address or ', '.join(formataddr((name, self.addresses[name])) for name in recipients)
-        if self.bcc:
-            message['Bcc'] = self.bcc
+        copy_owner = important and 'Owner' in recipients and reply_address is None
+        copy_bcc = self.bcc if reply_address is not None or copy_owner else ''
+        copy_cc = self.important_cc if copy_owner else ''
+        if copy_cc:message['Cc'] = copy_cc
+        if copy_bcc:message['Bcc'] = copy_bcc
         message['Reply-To'] = self.addresses[sender]
         message['Subject'] = subject[:200]
         message['Date'] = formatdate(localtime=True)
@@ -261,7 +268,7 @@ class StaffMail:
         delivery_mode = self.internal_mode if reply_address is None else self.mode
         if delivery_mode == 'draft':
             return f'Email drafted locally: {path.name}. Nothing sent.'
-        envelope = list(dict.fromkeys(([reply_address] if reply_address else [self.addresses[n] for n in recipients]) + ([self.bcc] if self.bcc else [])))
+        envelope = list(dict.fromkeys(([reply_address] if reply_address else [self.addresses[n] for n in recipients]) + ([copy_cc] if copy_cc else []) + ([copy_bcc] if copy_bcc else [])))
         return self._submit(message, path, sender, envelope)
 
     def send_saved(self, path):
@@ -292,8 +299,6 @@ class StaffMail:
         envelope = list(dict.fromkeys(envelope))
         if not envelope:
             raise ValueError('Message has no valid recipients.')
-        if self.bcc and self.bcc not in envelope:
-            envelope.append(self.bcc)
         try:
             fd = os.open(status, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         except FileExistsError:
@@ -354,19 +359,9 @@ class StaffMail:
         return callback
 
     def finish(self):
-        if self.mode == 'off':
-            return
-        for sender, report in self.reports.items():
-            if sender in self.reported:
-                continue
-            self.reported.add(sender)
-            recipients = ['Owner']
-            if self.team_updates and sender == 'Morgan':
-                recipients += [name for name in STAFF if name != sender]
-            try:
-                print(self.deliver(sender, recipients, f'{sender}: completed staff report', report, kind='report'))
-            except (ValueError, OSError):
-                print('Staff report email could not be prepared; local reports remain available.')
+        # Routine reports stay in the dashboard. Email is reserved for blockers,
+        # failures, and questions that require human input.
+        self.reported.update(self.reports)
 
     def failure(self, reason):
         # Callers supply a fixed explanation, never raw exceptions or credentials.
@@ -374,7 +369,7 @@ class StaffMail:
             return
         self.finish()
         try:
-            print(self.deliver('Morgan', ['Owner'], 'Morgan: staff run needs attention', reason, kind='failure'))
+            print(self.deliver('Morgan', ['Owner'], 'Morgan: staff run needs attention', reason, kind='failure', important=True))
         except (ValueError, OSError):
             print('Failure notification could not be prepared.')
 
@@ -390,7 +385,7 @@ class StaffMail:
                 return "Agent email-tool limit reached; report delivery slots are reserved."
             self.tool_count += 1
             try:
-                return self.deliver(sender, recipients, subject, body)
+                return self.deliver(sender, recipients, subject, body, important='Owner' in recipients)
             except (ValueError, OSError):
                 return 'Email not prepared. Check recipient names, subject, and local outbox access.'
         return email_staff

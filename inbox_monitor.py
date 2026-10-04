@@ -209,7 +209,7 @@ class InboxMonitor:
                     if external:
                         outcome = self.mail.deliver(staff, ['Owner'], 'External email escalated to CEO',
                             'An outside email requires your review. The original email is attached.',
-                            kind='forward', forwarded_message=message)
+                            kind='forward', forwarded_message=message, important=True)
                         if self.mail.mode == 'send' and 'accepted by mail server' not in outcome:
                             raise RuntimeError('Forwarding not confirmed.')
                         reply = EXTERNAL_ACKNOWLEDGMENTS[staff]
