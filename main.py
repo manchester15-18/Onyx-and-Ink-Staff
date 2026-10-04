@@ -74,7 +74,8 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     rules = (
         "Use one JSON object matching the schema per tool call; never a top-level array. "
         "Keep tool calls and reports concise. Distinguish facts, sample inventory, assumptions, and recommendations. "
-        "Cite URLs for researched claims. Never invent search results or claim changes were deployed."
+        "Cite URLs for researched claims. Never invent search results or claim changes were deployed. "
+        "Always return a visible CrewAI Thought/Action instruction or Final Answer; never return reasoning-only output."
     )
     common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=6, verbose=verbose)
     marketing = Agent(role="Avery - Head of Marketing - Onyx and Ink", goal="Plan a focused custom gift campaign.", backstory="Your name is Avery. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks. " + rules, tools=[check_blank_stock, *search_tools], **common)

@@ -93,6 +93,49 @@ class GroqLLM(OpenAICompletion):
                 params["parallel_tool_calls"] = False
         return params
 
+    def call(
+        self,
+        messages,
+        tools=None,
+        callbacks=None,
+        available_functions=None,
+        from_task=None,
+        from_agent=None,
+        response_model=None,
+    ):
+        """Return visible content, retrying GPT-OSS reasoning-only responses."""
+        retry_messages = messages
+        for attempt in range(3):
+            result = super().call(
+                retry_messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                from_task=from_task,
+                from_agent=from_agent,
+                response_model=response_model,
+            )
+            if result is not None and (not isinstance(result, str) or result.strip()):
+                return result
+            if attempt < 2:
+                if isinstance(retry_messages, str):
+                    retry_messages = [{"role": "user", "content": retry_messages}]
+                else:
+                    retry_messages = [dict(message) for message in retry_messages]
+                retry_messages.append({
+                    "role": "user",
+                    "content": (
+                        "The prior completion contained no visible answer. Respond now in "
+                        "message content with either the required CrewAI Thought/Action "
+                        "instruction or the complete Final Answer. Never return a blank or "
+                        "reasoning-only response."
+                    ),
+                })
+        raise ValueError(
+            "Groq returned three empty visible responses. Try the run again or choose a "
+            "different GROQ_MODEL; CrewAI cannot use reasoning-only output."
+        )
+
     def supports_stop_words(self):
         return False
 

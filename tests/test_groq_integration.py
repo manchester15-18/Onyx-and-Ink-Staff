@@ -120,5 +120,34 @@ class GroqTests(unittest.TestCase):
             self.assertEqual(len(llm.budget.entries),2)
         finally: llm.close()
 
+    def test_empty_visible_response_is_retried_with_explicit_instruction(self):
+        llm=GroqLLM('offline-test-key')
+        llm.client.close()
+        calls=[]
+        def respond(request):
+            payload=json.loads(request.content);calls.append(payload)
+            content='' if len(calls)==1 else 'Visible answer'
+            return httpx.Response(200,json={'id':'mock','object':'chat.completion','created':0,'model':llm.model,'choices':[{'index':0,'message':{'role':'assistant','content':content},'finish_reason':'stop'}]})
+        llm.client=OpenAI(api_key='offline-test-key',base_url='https://api.groq.com/openai/v1',http_client=httpx.Client(transport=httpx.MockTransport(respond)),max_retries=0)
+        try:
+            self.assertEqual(llm.call([{'role':'user','content':'Prepare a report.'}]),'Visible answer')
+            self.assertEqual(len(calls),2)
+            self.assertIn('no visible answer',calls[1]['messages'][-1]['content'])
+        finally:llm.close()
+
+    def test_repeated_empty_visible_responses_raise_clear_error(self):
+        llm=GroqLLM('offline-test-key')
+        llm.client.close()
+        calls=[]
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(200,json={'id':'mock','object':'chat.completion','created':0,'model':llm.model,'choices':[{'index':0,'message':{'role':'assistant','content':''},'finish_reason':'stop'}]})
+        llm.client=OpenAI(api_key='offline-test-key',base_url='https://api.groq.com/openai/v1',http_client=httpx.Client(transport=httpx.MockTransport(respond)),max_retries=0)
+        try:
+            with self.assertRaisesRegex(ValueError,'three empty visible responses'):
+                llm.call('Prepare a report.')
+            self.assertEqual(len(calls),3)
+        finally:llm.close()
+
 
 if __name__ == '__main__': unittest.main()
