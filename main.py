@@ -14,11 +14,10 @@ os.environ.setdefault("OTEL_SDK_DISABLED", "true")
 from dotenv import load_dotenv
 from crewai import Agent, Crew, Process, Task
 from crewai.tools import tool
-from crewai_tools import SerperDevTool
 from openai import APIConnectionError, APIStatusError
-import requests
 from groq_llm import GroqLLM
 from staff_email import StaffMail
+from web_research import WebResearchError, search as tavily_search, verify as verify_tavily
 
 DEFAULT_DIRECTIVE = "Plan our upcoming custom gift product push for Onyx and Ink. Provide a coordinated operational plan."
 SAMPLE_INVENTORY = {
@@ -28,6 +27,17 @@ SAMPLE_INVENTORY = {
     "puzzle": "85 units (120-piece Sublimation Blanks)",
     "bookmark": "300 units (Aluminum Gloss)",
 }
+
+
+@tool("Search the live web with Tavily")
+def search_web(query: str) -> str:
+    """Search current public web sources using one JSON object: {"query": "specific search"}.
+    Results include titles, URLs, and concise source text. Cite returned URLs.
+    """
+    try:
+        return tavily_search(PROJECT_DIR, query, max_results=5)
+    except (ValueError, WebResearchError) as error:
+        return f"WEB SEARCH UNAVAILABLE: {error} Continue with labeled assumptions and do not retry this search."
 
 
 @tool("Check sample blank inventory")
@@ -71,35 +81,25 @@ def positive_int(name, default):
 
 
 def verified_search_key(search_key):
-    """Reject unusable Serper credentials before agents enter a tool loop."""
+    """Reject unusable Tavily credentials before agents enter a tool loop."""
     if not search_key:
         return None
     try:
-        response = requests.post(
-            "https://google.serper.dev/search",
-            headers={"X-API-KEY": search_key},
-            json={"q": "Onyx and Ink custom gifts", "num": 1},
-            timeout=15,
-        )
-    except requests.RequestException:
-        print("Web search disabled for this run: Serper could not be reached. The agents will label research needs and continue.")
-        return None
-    if response.status_code in (401, 403):
-        print("Web search disabled for this run: Serper rejected the configured API key. Replace SERPER_API_KEY to restore research; the agents will continue without it.")
-        return None
-    if not response.ok:
-        print(f"Web search disabled for this run: Serper returned HTTP {response.status_code}. The agents will continue without it.")
+        verify_tavily(search_key)
+    except WebResearchError as error:
+        print(f"Web search disabled for this run: {error} Update TAVILY_API_KEY in dashboard Settings; the agents will continue without research.")
         return None
     return search_key
 
 
 def build_crew(llm, search_key=None, verbose=False, mail=None):
-    search_tools = [SerperDevTool(n_results=3)] if search_key else []
+    search_tools = [search_web] if search_key else []
     rules = (
         "Use one JSON object matching the schema per tool call; never a top-level array. "
         "Keep tool calls and reports concise. Distinguish facts, sample inventory, assumptions, and recommendations. "
         "Cite URLs for researched claims. Never invent search results or claim changes were deployed. "
-        "Always return a visible CrewAI Thought/Action instruction or Final Answer; never return reasoning-only output."
+        "Always return a visible CrewAI Thought/Action instruction or Final Answer; never return reasoning-only output. "
+        "If web search reports unavailable, do not retry it; continue with clearly labeled assumptions."
     )
     common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=6, verbose=verbose)
     marketing = Agent(role="Avery - Head of Marketing - Onyx and Ink", goal="Plan a focused custom gift campaign.", backstory="Your name is Avery. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks. " + rules, tools=[check_blank_stock, *search_tools], **common)
@@ -147,7 +147,7 @@ def main(argv=None):
     try:
         mail = StaffMail.from_env(PROJECT_DIR)
         key = credential("GROQ_API_KEY")
-        search_key = credential("SERPER_API_KEY", required=False)
+        search_key = credential("TAVILY_API_KEY", required=False)
         llm = GroqLLM(
             key, model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
             rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 7000),

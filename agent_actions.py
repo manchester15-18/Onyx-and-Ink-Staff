@@ -137,9 +137,11 @@ class Actions:
             if not x.tzinfo or not y.tzinfo or y<=x:raise ValueError('Use start/end times with timezone offsets and end after start.')
             return self.workspace.create_event(self.text(a,'summary',200),start,end)
         if action in ('search','webpage'):
-            cfg=dotenv_values(self.root/'.env');key=cfg.get('SERPER_API_KEY')
-            if not key:raise ValueError('Web research needs a Serper API key.')
-            if action=='search':url='https://google.serper.dev/search';payload={'q':self.text(a,'query',500),'num':5}
+            cfg=dotenv_values(self.root/'.env');key=cfg.get('TAVILY_API_KEY')
+            if not key:raise ValueError('Web research needs a Tavily API key in Settings.')
+            if action=='search':
+                from web_research import search
+                return {'untrusted_web_content':search(self.root,self.text(a,'query',500),max_results=5)}
             else:
                 target=self.text(a,'url',1500);p=urlparse(target)
                 import ipaddress
@@ -147,10 +149,10 @@ class Actions:
                 try:ipaddress.ip_address(p.hostname);raise ValueError('Use a public website hostname, not an IP address.')
                 except ValueError as e:
                     if str(e).startswith('Use a public'):raise
-                url='https://scrape.serper.dev';payload={'url':target}
-            r=requests.post(url,headers={'X-API-KEY':key},json=payload,timeout=30)
-            if not r.ok:raise RuntimeError('Web research request failed; check Serper quota.')
-            return {'untrusted_web_content':json.dumps(r.json())[:6500]}
+                # Tavily Extract uses the same account and returns page content.
+                r=requests.post('https://api.tavily.com/extract',headers={'Authorization':'Bearer '+key},json={'urls':[target],'extract_depth':'basic'},timeout=30)
+                if not r.ok:raise RuntimeError('Webpage research failed; check Tavily authorization and credits.')
+                return {'untrusted_web_content':json.dumps(r.json())[:6500]}
         if action=='design':
             from design_images import generate
             model=a.get('model','schnell')

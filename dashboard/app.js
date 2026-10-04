@@ -49,6 +49,7 @@ function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S
 /* ---------- rendering ---------- */
 function render(){
   $('connection').textContent='Connected locally';
+  const hour=new Date().getHours();$('greeting').textContent=(hour<12?'Good morning':hour<18?'Good afternoon':'Good evening')+', James.';
   if(document.activeElement!==$('cleanupDays'))$('cleanupDays').value=String(S.cleanupDays??30);
   $('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[S.mode]||S.mode;
   $('modeNote').textContent=S.mode==='send'?'Monitor may send on its own':'Approval required to send';
@@ -62,7 +63,7 @@ function render(){
   $('needBadge').hidden=!items.length;$('needBadge').textContent=items.length;
   const pending=S.activity.filter(a=>a.status==='draft'||isBad(a)).length;$('actBadge').hidden=!pending;$('actBadge').textContent=pending;
   $('team').replaceChildren(...S.agents.map(a=>{const[st,txt]=agentState(a.name);const b=el('button','ag'+(a.name===agent?' sel':''));
-    const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name+' · '+a.role),el('small','',txt));b.append(av,t);b.onclick=()=>{pickAgent(a.name);toggleChat(true)};return b}));
+    const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name),el('small','',a.role+' · '+txt));b.append(av,t);b.onclick=()=>{pickAgent(a.name);toggleChat(true)};return b}));
   $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
   if(!signaturesReady){$('signatureList').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role));const input=el('textarea');input.dataset.signature=a.name;input.maxLength=1200;input.rows=6;input.value=S.signatures?.[a.name]||'';input.setAttribute('aria-label',a.name+' email signature');c.append(input);return c}));signaturesReady=true}
   $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
@@ -73,6 +74,8 @@ function render(){
   $('checkWorkspace').disabled=ws.state!=='connected';
   const cfTest=S.integrations?.cloudflareTest||{};$('cloudflareStatus').textContent=S.integrations?.cloudflare?(S.integrations.freePlan?(cfTest.state==='connected'?'Connected · live image generation verified':'Configured · ready for a live test'):'Configured · confirm Free plan to enable designs'):'Enter credentials on this Mac';
   if(document.activeElement!==$('cfFree'))$('cfFree').checked=!!S.integrations?.freePlan;
+  const tvTest=S.integrations?.tavilyTest||{};$('tavilyStatus').textContent=S.integrations?.tavily?(tvTest.state==='connected'?'Connected · live web search verified':'Configured · ready for a live test'):'Enter a Tavily API key to give every agent current web search.';
+  $('testTavily').disabled=!S.integrations?.tavily;
   $('wifiUrl').textContent=S.wifi?.enabled?S.wifi.url:'Wi-Fi access has not been enabled.';
   $('telegramStatus').textContent=S.telegram?.configured?(S.telegram.enabled?'Enabled':'Disabled')+' · '+S.telegram.paired+' paired':'Token needed';
   if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=!!S.telegram?.enabled;
@@ -252,11 +255,14 @@ async function askAgent(text){const body=text.trim();if(!body||chatBusy)return;$
   try{const a=await chatCall(agent,body);if(FAILED.test(String(a)))toast('The agent could not respond. Check Groq connectivity and quota.','bad')}catch(e){$('chatBody').value=body;toast(e.message,'bad')}}
 function toggleChat(open){$('chatPanel').hidden=!open;$('toggleChat').setAttribute('aria-expanded',String(open));if(open){loadChat();$('chatBody').focus()}}
 on('toggleChat','click',()=>toggleChat($('chatPanel').hidden));on('closeChat','click',()=>toggleChat(false));
+on('heroChat','click',()=>toggleChat(true));
 on('checkSmtp','click',async()=>{$('checkSmtp').disabled=true;try{$('smtpNotice').textContent=(await api('smtp-check',{})).message}catch(e){$('smtpNotice').textContent=e.message}finally{$('checkSmtp').disabled=false}});
 on('connectWorkspace','click',async()=>{try{$('workspaceNotice').textContent=(await api('workspace-authorize',{})).message}catch(e){$('workspaceNotice').textContent=e.message}});
 on('checkWorkspace','click',async()=>{$('checkWorkspace').disabled=true;try{$('workspaceNotice').textContent=(await api('workspace-check',{})).message;sig='';await refresh()}catch(e){$('workspaceNotice').textContent=e.message}finally{$('checkWorkspace').disabled=false}});
 on('saveCloudflare','click',async()=>{try{await api('cloudflare',{account:$('cfAccount').value.trim(),token:$('cfToken').value.trim(),freePlan:$('cfFree').checked});$('cfToken').value='';toast('Cloudflare credentials saved locally.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('testCloudflare','click',async()=>{$('testCloudflare').disabled=true;try{toast((await api('cloudflare-check',{})).message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('testCloudflare').disabled=false}});
+on('saveTavily','click',async()=>{$('saveTavily').disabled=true;try{const r=await api('tavily',{token:$('tavilyToken').value.trim()});$('tavilyToken').value='';toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('saveTavily').disabled=false}});
+on('testTavily','click',async()=>{$('testTavily').disabled=true;try{toast((await api('tavily-check',{})).message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('testTavily').disabled=false}});
 const signatureValues=()=>Object.fromEntries([...document.querySelectorAll('[data-signature]')].map(x=>[x.dataset.signature,x.value]));
 on('saveSignatures','click',async()=>{$('saveSignatures').disabled=true;try{const r=await api('signatures',{signatures:signatureValues()});toast(r.message);S.signatures=r.signatures}catch(e){toast(e.message,'bad')}finally{$('saveSignatures').disabled=false}});
 on('resetSignatures','click',async()=>{if(!await sure('Restore all four agent signatures to their defaults?'))return;try{const r=await api('signatures',{reset:true});S.signatures=r.signatures;signaturesReady=false;render();toast(r.message)}catch(e){toast(e.message,'bad')}});

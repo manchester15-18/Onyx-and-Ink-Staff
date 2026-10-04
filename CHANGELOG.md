@@ -124,3 +124,20 @@
 - Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
 
 <!-- backup 3888a0b1a5024fbbb2875a53e601e3613d92a2c972331e84be934fc489a0ed16 -->
+
+## 2026-10-04 17:58 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard/login.html (`dashboard/login.html`).
+- Updated dashboard appearance and responsive layout (`dashboard/style.css`).
+- Updated main.py (`main.py`).
+- Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
+- Updated tests/test_web_research.py (`tests/test_web_research.py`).
+- Updated web_research.py (`web_research.py`).
+
+<!-- backup 2532711533bfeac9c73101ec97b7c65a4b1ed27cfeb6cf6e33e3557382d8d730 -->

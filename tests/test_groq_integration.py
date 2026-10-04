@@ -7,7 +7,7 @@ import socket
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault('CREWAI_TELEMETRY_DISABLED', 'true')
@@ -41,11 +41,10 @@ class GroqTests(unittest.TestCase):
                 main.credential('GROQ_API_KEY')
             self.assertNotIn('secret', str(error.exception))
 
-    def test_invalid_serper_key_disables_search_without_stopping_run(self):
-        response=Mock(status_code=403,ok=False)
-        with patch('main.requests.post',return_value=response),contextlib.redirect_stdout(io.StringIO()) as output:
+    def test_invalid_tavily_key_disables_search_without_stopping_run(self):
+        with patch('main.verify_tavily',side_effect=main.WebResearchError('Tavily rejected the API key.')),contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertIsNone(main.verified_search_key('private-test-key'))
-        self.assertIn('Serper rejected',output.getvalue())
+        self.assertIn('Tavily rejected',output.getvalue())
         self.assertNotIn('private-test-key',output.getvalue())
 
     def test_inventory(self):

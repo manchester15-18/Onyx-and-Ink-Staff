@@ -8,7 +8,7 @@ This project uses **Groq**, not xAI's **Grok**. Its default model is `qwen/qwen3
 2. Open https://console.groq.com/keys, select **Create API Key**, and name it `Onyx and Ink Staff`.
 3. Copy the key into the existing `.env` file after `GROQ_API_KEY=`. Paste it without quotes or spaces. Never paste keys into chat.
 4. Keep `GROQ_MODEL=qwen/qwen3.8-27b`. Check model access and actual account limits at https://console.groq.com/settings/limits. Use the Free plan if you want to avoid paid usage; don't enable paid billing for this setup.
-5. Your existing `SERPER_API_KEY` is preserved. Serper provides optional web research; obtain a key at https://serper.dev if needed. Leave the value blank to disable search. Serper has its own usage allowance.
+5. Add `TAVILY_API_KEY` through dashboard Settings for current web research. Tavily’s free plan includes monthly credits and no payment card requirement. Leave it blank to disable live search; agents will continue with labeled assumptions.
 
 Do not overwrite your existing `.env` with `.env.example`: the example contains blank keys. Old Gemini keys can remain in `.env`; the rewritten code does not use them. `.env` is excluded from Git.
 
@@ -220,7 +220,7 @@ GitHub receives application code, dashboard assets, tests, dependency requiremen
 
 ## Actions from staff chat
 
-Open **Agent chat** in the toolbar or select a staff member. The drawer stays closed on other pages until opened. All four staff agents can create local reports, draft email, generate Cloudflare designs, research public websites through Serper, create Google Docs/Sheets/Slides, upload generated files to Drive, and create events on the connected account's primary calendar. Chat requests run a maximum of six reasoning steps; completed actions appear under Created files. Emails from chat always wait in Outbox for **Approve & send**, even if the monitor is in Live mode. Files created through Telegram chat are also sent back to the paired private conversation.
+Open **Agent chat** in the toolbar or select a staff member. The drawer stays closed on other pages until opened. All four staff agents can create local reports, draft email, generate Cloudflare designs, research public websites through Tavily, create Google Docs/Sheets/Slides, upload generated files to Drive, and create events on the connected account's primary calendar. Chat requests run a maximum of six reasoning steps; completed actions appear under Created files. Emails from chat always wait in Outbox for **Approve & send**, even if the monitor is in Live mode. Files created through Telegram chat are also sent back to the paired private conversation.
 
 Configure Cloudflare on the host Mac in **Settings → Cloudflare designs**. Use a Workers AI token, account ID, and the Workers Free plan. Generation has a conservative local cap of 50 attempts/day (UTC), counts uncertain requests, and never switches to a paid provider. Both models share Cloudflare's account-wide allowance; other account usage can exhaust it sooner. Schnell is the default. Klein supports editing a previously generated design using its file ID; live rendering requires provider validation after credentials are entered. Generated designs require checking dimensions, spelling, and resolution against the physical product before printing.
 
