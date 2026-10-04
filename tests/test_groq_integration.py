@@ -31,6 +31,7 @@ class GroqTests(unittest.TestCase):
             self.assertEqual(payload['messages'][0]['content'],'First\nSecond')
             self.assertEqual(payload['messages'][1]['tool_call_id'],'call_123')
             self.assertEqual(payload['messages'][1]['content'],'Result')
+            self.assertEqual(payload['extra_body'], {'include_reasoning': False})
             with self.assertRaises(ValueError):llm._prepare_completion_params([{'role':'user','content':[{'type':'image_url','image_url':{}}]}])
         finally:llm.close()
 
@@ -68,6 +69,7 @@ class GroqTests(unittest.TestCase):
             payload = json.loads(request.content)
             self.assertEqual(payload['model'], 'openai/gpt-oss-120b')
             self.assertEqual(payload['reasoning_effort'], 'low')
+            self.assertFalse(payload['include_reasoning'])
             self.assertNotIn('stop', payload)
             calls.append(payload)
             content = (

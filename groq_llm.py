@@ -83,6 +83,12 @@ class GroqLLM(OpenAICompletion):
         params.pop("stop", None)
         if self.model.startswith("openai/gpt-oss-"):
             params["reasoning_effort"] = "low"
+            # CrewAI expects ReAct tool instructions in message.content. GPT-OSS can
+            # otherwise return only Groq's separate reasoning field, which CrewAI
+            # treats as an empty response before it can run the requested tool.
+            extra_body = dict(params.get("extra_body") or {})
+            extra_body["include_reasoning"] = False
+            params["extra_body"] = extra_body
             if tools:
                 params["parallel_tool_calls"] = False
         return params
