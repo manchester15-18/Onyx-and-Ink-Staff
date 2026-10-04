@@ -50,4 +50,4 @@ class ManualReplyTests(unittest.TestCase):
             self.assertIn('owner@example.com',str(msg['From']))
             self.assertEqual(msg['To'],'customer@example.com');self.assertEqual(msg['Bcc'],'personal@example.com')
             self.assertEqual(msg['Auto-Submitted'],'no');self.assertEqual(msg['In-Reply-To'],'<request@example.com>')
-            self.assertNotIn('Automated staff message',msg.get_content())
+            self.assertNotIn('Automated staff message',msg.get_body(preferencelist=('plain',)).get_content())

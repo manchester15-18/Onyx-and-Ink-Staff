@@ -24,7 +24,7 @@ class StaffMailTests(unittest.TestCase):
             config={'STAFF_EMAIL_MODE':'draft','MORGAN_EMAIL':'coo@example.com','AVERY_EMAIL':'marketing@example.com','JORDAN_EMAIL':'it@example.com','CAMERON_EMAIL':'hr@example.com','OWNER_EMAIL':'ceo@example.com','OWNER_BCC_EMAIL':'ceo@example.com','BUSINESS_WEBSITE':'https://onyxandink.org'}
             mail=StaffMail.from_env(directory,config=config);mail.deliver('Jordan',['Owner'],'Design update','The design is ready for review.')
             msg=BytesParser(policy=policy.default).parsebytes(next(mail.outbox.glob('*.eml')).read_bytes())
-            body=msg.get_content()
+            body=msg.get_body(preferencelist=('plain',)).get_content()
             self.assertIn('Jordan\nIT & Storefront Development Lead\nOnyx & Ink',body)
             self.assertIn('it@example.com | https://onyxandink.org',body)
 
@@ -39,7 +39,7 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn('avery@example.com',str(msg['From']))
             self.assertIn('jordan@example.com',str(msg['To']))
             self.assertIn('morgan@example.com',str(msg['To']))
-            self.assertIn('Campaign report',msg.get_content())
+            self.assertIn('Campaign report',msg.get_body(preferencelist=('plain',)).get_content())
             smtp.assert_not_called()
 
     def test_callbacks_do_not_duplicate_and_coo_copies_team(self):
@@ -76,6 +76,19 @@ class StaffMailTests(unittest.TestCase):
             self.assertEqual(client.send_message.call_args.kwargs['to_addrs'],['morgan@example.com','private@example.com'])
             self.assertIn('accepted',result)
             self.assertEqual(next(mail.outbox.glob('*.status')).read_text().strip(),'accepted')
+
+    def test_internal_auto_send_external_approval_and_clean_markdown(self):
+        with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP') as smtp:
+            client=MagicMock();client.send_message.return_value={};smtp.return_value=client;client.__enter__.return_value=client
+            creds={name:('account@example.com','local-test-password') for name in STAFF}
+            mail=StaffMail(directory,'draft',ADDRESSES,'smtp.example.com',587,'starttls',creds,bcc='private@example.com',internal_mode='send')
+            internal=mail.deliver('Avery',['Owner'],'Question','## Launch question\n\n**Approve** the bundle?\n\n- Tumbler\n- Pen')
+            external=mail.deliver('Avery',['Owner'],'Customer note','Please review',kind='compose',reply_address='customer@example.com')
+            self.assertIn('accepted',internal);self.assertIn('drafted locally',external);self.assertEqual(client.send_message.call_count,1)
+            message=BytesParser(policy=policy.default).parsebytes((mail.outbox/'01-avery.eml').read_bytes())
+            plain=message.get_body(preferencelist=('plain',)).get_content();rich=message.get_body(preferencelist=('html',)).get_content()
+            self.assertNotIn('##',plain);self.assertNotIn('**',plain);self.assertIn('• Tumbler',plain)
+            self.assertIn('<h3',rich);self.assertIn('<strong>Approve</strong>',rich);self.assertIn('<ul',rich)
 
     def test_send_failure_is_not_retried_or_exposed(self):
         with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP',side_effect=OSError('sensitive diagnostic')) as smtp:

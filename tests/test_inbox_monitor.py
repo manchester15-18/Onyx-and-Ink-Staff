@@ -4,9 +4,9 @@ from email.parser import Parser
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from staff_email import StaffMail, STAFF
-from inbox_monitor import InboxMonitor, message_route, plain_body
+from inbox_monitor import InboxMonitor, message_route, plain_body, owner_reply_context, continue_owner_reply
 
 ADDRESSES={n:f'{n.lower()}@example.com' for n in (*STAFF,'Owner')}
 
@@ -88,7 +88,8 @@ class InboxTests(unittest.TestCase):
                 forward=(mail.outbox/'01-avery.eml').read_text()
                 self.assertIn('message/rfc822',forward)
                 self.assertIn('To: Owner <owner@example.com>',forward)
-                self.assertIn('forwarded to our CEO',Parser(policy=policy.default).parsestr(contents).get_content())
+                parsed=Parser(policy=policy.default).parsestr(contents)
+                self.assertIn('forwarded to our CEO',parsed.get_body(preferencelist=('plain',)).get_content())
                 self.assertIn('To: customer@example.com',contents)
                 self.assertIn('Bcc: owner@gmail.com',contents)
                 self.assertIn('In-Reply-To: <request-1@example.com>',contents)
@@ -109,6 +110,18 @@ class InboxTests(unittest.TestCase):
             self.assertEqual(monitor.db.execute('SELECT state FROM processed').fetchone()[0],'needs-review')
             monitor.close()
             self.assertFalse(mail.outbox.exists())
+
+    def test_owner_reply_becomes_agent_continuation_with_thread_context(self):
+        message=email();message.set_content('Yes, proceed with the design.\n\nOn Sunday, Avery wrote:\n> Should I create the Christmas tumbler design?')
+        prompt=owner_reply_context(message,message.get_content())
+        self.assertIn('CEO NEW REPLY:\nYes, proceed',prompt)
+        self.assertIn('PRIOR THREAD CONTEXT',prompt)
+        chat=Mock();chat.ask.return_value='Design created and uploaded.'
+        result=continue_owner_reply(chat,'Avery',message,message.get_content())
+        self.assertEqual(result,'Design created and uploaded.')
+        call=chat.ask.call_args.args
+        self.assertEqual(call[0],'Avery');self.assertEqual(len(call[2]),36)
+        self.assertEqual(chat.ask.call_args.kwargs['source'],'email')
 
 
 if __name__=='__main__': unittest.main()

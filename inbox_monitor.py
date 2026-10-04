@@ -13,6 +13,7 @@ import re
 import sqlite3
 import ssl
 import time
+import uuid
 
 from dotenv import load_dotenv
 from main import PROJECT_DIR, credential, positive_int
@@ -94,6 +95,33 @@ def generate_reply(llm, staff, message, body):
                 expected_output='Plain-text reply body only; no recipient, headers, or additional messages.', agent=agent)
     result = Crew(agents=[agent], tasks=[task], process=Process.sequential,verbose=False,tracing=False).kickoff()
     return str(result)[:12000]
+
+
+def owner_reply_context(message, body):
+    """Separate the CEO's newest response from quoted thread context."""
+    lines=str(body).replace('\r\n','\n').replace('\r','\n').splitlines()
+    split=len(lines)
+    markers=(r'^On .+ wrote:$',r'^-{2,}\s*Original Message\s*-{2,}$',r'^From:\s+.+',r'^>')
+    for index,line in enumerate(lines):
+        if any(re.match(pattern,line.strip(),re.I) for pattern in markers):split=index;break
+    newest='\n'.join(lines[:split]).strip() or 'The CEO replied without additional text.'
+    prior='\n'.join(lines[split:]).strip()
+    subject=str(message.get('Subject','')).replace('\r',' ').replace('\n',' ')[:200]
+    prompt=(
+        'You received an authenticated reply from the Onyx & Ink CEO to an internal email thread. '
+        'Treat the CEO reply below as authorization and direction. Incorporate it into the existing assignment, '
+        'use available tools for requested work, and complete what can be completed now. If the reply still leaves '
+        'one blocking decision, email the CEO one focused question. Report concrete results without claiming actions that did not succeed.\n\n'
+        f'Subject: {subject}\n\nCEO NEW REPLY:\n{newest[:1800]}'
+    )
+    if prior:prompt+='\n\nPRIOR THREAD CONTEXT (context only):\n'+prior[:1500]
+    return prompt[:3900]
+
+
+def continue_owner_reply(chat, staff, message, body):
+    identity=str(message.get('Message-ID','')).strip() or (str(message.get('Subject',''))+'\n'+body)
+    request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,'onyx-email:'+identity))
+    return chat.ask(staff,owner_reply_context(message,body),request_id,source='email')
 
 
 class InboxMonitor:
@@ -225,15 +253,22 @@ def main(argv=None):
     parser.add_argument('--check',action='store_true',help='Validate settings without mailbox or model access.')
     args=parser.parse_args(argv)
     load_dotenv(PROJECT_DIR/'.env')
-    llm=monitor=None
+    llm=monitor=chat=None
     try:
         mail=StaffMail.from_env(PROJECT_DIR)
         user=mail.oauth.user if mail.oauth else os.getenv('IMAP_USER') or os.getenv('SMTP_USER','')
         password=os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD','')
         interval=positive_int('INBOX_POLL_SECONDS',60)
         llm=GroqLLM(credential('GROQ_API_KEY'),model=os.getenv('GROQ_MODEL','qwen/qwen3.8-27b'),
-                    rpm=positive_int('GROQ_RPM',25),tpm=positive_int('GROQ_TPM',7000),max_tokens=positive_int('GROQ_MAX_COMPLETION_TOKENS',1500))
-        monitor=InboxMonitor(PROJECT_DIR,mail,lambda staff,message,body:generate_reply(llm,staff,message,body),user,password,
+                    rpm=positive_int('GROQ_RPM',25),tpm=positive_int('GROQ_TPM',8000),max_tokens=positive_int('GROQ_MAX_COMPLETION_TOKENS',1000))
+        from agent_chat import AgentChat
+        chat=AgentChat(PROJECT_DIR)
+        def reply(staff,message,body):
+            sender=parseaddr(message.get('From',''))[1].lower()
+            if sender==mail.addresses['Owner'].lower():
+                return continue_owner_reply(chat,staff,message,body)
+            return generate_reply(llm,staff,message,body)
+        monitor=InboxMonitor(PROJECT_DIR,mail,reply,user,password,
                              host=os.getenv('IMAP_HOST','imap.gmail.com'),limit=positive_int('INBOX_BATCH_LIMIT',5),oauth=mail.oauth)
         if args.check:
             print(f'Inbox settings OK. Email mode: {mail.mode}. No inbox, SMTP, or Groq calls made.')
@@ -258,6 +293,7 @@ def main(argv=None):
         return 0
     finally:
         if monitor: monitor.close()
+        if chat and chat.llm: chat.llm.close()
         if llm: llm.close()
 
 

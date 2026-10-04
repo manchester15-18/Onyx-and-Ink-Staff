@@ -112,6 +112,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
             agent.backstory += (
                 f" Your email address is {mail.addresses[name]}. You may email Owner or named coworkers "
                 "when a specific question, assignment, or decision needs their attention. "
+                "Internal staff and Owner email sends automatically. If missing information blocks useful work, email Owner one focused question; the inbox monitor will route the authenticated reply back to you for follow-up. "
                 "Completion reports are emailed automatically; do not duplicate them. "
                 "A separate inbox monitor handles incoming replies. Do not claim to have received a reply unless it is supplied in your task context."
             )

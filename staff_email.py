@@ -1,5 +1,6 @@
 """Named staff mailboxes, internal-only mail tools, and autonomous report delivery."""
 import os
+import html
 import json
 import re
 import smtplib
@@ -58,14 +59,73 @@ def reset_signature_settings(project_dir,addresses,website='https://onyxandink.o
     return default_signatures(addresses,website)
 
 
+def markdown_to_plain(value):
+    """Turn common model Markdown into a readable plain-text email body."""
+    text=str(value).replace('\r\n','\n').replace('\r','\n')
+    text=re.sub(r'```(?:[\w+-]+)?\n?', '', text)
+    text=re.sub(r'!\[([^]]*)\]\([^)]+\)', r'\1', text)
+    text=re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)', r'\1 (\2)', text)
+    text=re.sub(r'^\s{0,3}#{1,6}\s+', '', text, flags=re.M)
+    text=re.sub(r'^\s*[-*+]\s+', '• ', text, flags=re.M)
+    text=re.sub(r'^\s*>\s?', '', text, flags=re.M)
+    text=re.sub(r'(\*\*|__)(.+?)\1', r'\2', text)
+    text=re.sub(r'(?<!\*)\*([^*\n]+)\*', r'\1', text)
+    text=re.sub(r'(?<!_)_([^_\n]+)_', r'\1', text)
+    text=re.sub(r'`([^`]+)`', r'\1', text)
+    text=re.sub(r'^\s*(?:---+|___+|\*\*\*+)\s*$', '', text, flags=re.M)
+    return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def markdown_to_html(value):
+    """Render a safe, small Markdown subset for Gmail and other mail clients."""
+    def inline(raw):
+        escaped=html.escape(raw,quote=True)
+        escaped=re.sub(r'\[([^]]+)\]\((https?://[^)]+)\)',r'<a href="\2" style="color:#0071e3">\1</a>',escaped)
+        escaped=re.sub(r'(\*\*|__)(.+?)\1',r'<strong>\2</strong>',escaped)
+        escaped=re.sub(r'`([^`]+)`',r'<code style="background:#f1f1f3;padding:2px 5px;border-radius:5px">\1</code>',escaped)
+        escaped=re.sub(r'(?<!\*)\*([^*]+)\*',r'<em>\1</em>',escaped)
+        return escaped
+    lines=str(value).replace('\r\n','\n').replace('\r','\n').split('\n')
+    output=[];list_type=None;in_code=False;code=[]
+    def close_list():
+        nonlocal list_type
+        if list_type:output.append(f'</{list_type}>');list_type=None
+    for raw in lines:
+        if raw.strip().startswith('```'):
+            if in_code:
+                output.append('<pre style="white-space:pre-wrap;background:#f5f5f7;padding:12px;border-radius:10px">'+html.escape('\n'.join(code))+'</pre>');code=[]
+            in_code=not in_code;continue
+        if in_code:code.append(raw);continue
+        heading=re.match(r'^\s{0,3}(#{1,3})\s+(.+)$',raw)
+        bullet=re.match(r'^\s*[-*+]\s+(.+)$',raw)
+        numbered=re.match(r'^\s*\d+[.)]\s+(.+)$',raw)
+        if heading:
+            close_list();level=len(heading.group(1))+1;output.append(f'<h{level} style="margin:22px 0 8px">{inline(heading.group(2))}</h{level}>')
+        elif bullet or numbered:
+            wanted='ul' if bullet else 'ol'
+            if list_type!=wanted:close_list();list_type=wanted;output.append(f'<{wanted} style="padding-left:24px">')
+            output.append('<li style="margin:6px 0">'+inline((bullet or numbered).group(1))+'</li>')
+        elif not raw.strip():
+            close_list()
+        else:
+            close_list();output.append('<p style="margin:0 0 12px">'+inline(raw.strip())+'</p>')
+    close_list()
+    if code:output.append('<pre style="white-space:pre-wrap;background:#f5f5f7;padding:12px;border-radius:10px">'+html.escape('\n'.join(code))+'</pre>')
+    return ''.join(output)
+
+
 class StaffMail:
     def __init__(self, project_dir, mode='off', addresses=None, host='', port=587,
                  security='starttls', credentials=None, limit=12, team_updates=True, bcc='', oauth=None,
-                 signatures=None):
+                 signatures=None, internal_mode=None):
         if mode not in ('off', 'draft', 'send'):
             raise ValueError('STAFF_EMAIL_MODE must be off, draft, or send.')
+        internal_mode = ('draft' if mode == 'off' else mode) if internal_mode is None else internal_mode
+        if internal_mode not in ('draft','send'):
+            raise ValueError('STAFF_INTERNAL_EMAIL_MODE must be draft or send.')
         self.oauth = oauth
         self.mode = mode
+        self.internal_mode = internal_mode
         self.addresses = addresses or {}
         self.host, self.port, self.security = host, port, security
         self.credentials = credentials or {}
@@ -88,7 +148,7 @@ class StaffMail:
                 raise ValueError(f'Set a valid {name.upper()}_EMAIL address before enabling staff email.')
         if len({self.addresses[n].lower() for n in STAFF}) != len(STAFF):
             raise ValueError('Each agent needs a distinct mailbox or authorized alias.')
-        if mode == 'send':
+        if mode == 'send' or internal_mode == 'send':
             if not host or port not in (465, 587) or security not in ('ssl', 'starttls'):
                 raise ValueError('Configure SMTP_HOST, SMTP_PORT (465 or 587), and SMTP_SECURITY (ssl or starttls).')
             if (security == 'ssl' and port != 465) or (security == 'starttls' and port != 587):
@@ -125,7 +185,8 @@ class StaffMail:
         return cls(project_dir, (mode or get('STAFF_EMAIL_MODE', 'off')).lower(), addresses,
                    get('SMTP_HOST', ''), port, get('SMTP_SECURITY', 'starttls'), credentials,
                    team_updates=get('STAFF_EMAIL_TEAM_UPDATES', 'true').lower() == 'true',
-                   bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth, signatures=signatures)
+                   bcc=get('OWNER_BCC_EMAIL', ''), oauth=oauth, signatures=signatures,
+                   internal_mode=get('STAFF_INTERNAL_EMAIL_MODE','draft').lower())
 
     def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None):
         if self.mode == 'off':
@@ -168,7 +229,15 @@ class StaffMail:
         signature = self.signatures.get(sender,('CEO' if sender == 'Owner' else 'Onyx & Ink Team') + '\nOnyx & Ink')
         if kind not in ('manual', 'compose'):
             signature += f'\nAutomated staff message | Run {self.run_id}'
-        message.set_content(body[:30000] + '\n\n' + signature + '\n')
+        clean_body=markdown_to_plain(body[:30000])
+        message.set_content(clean_body + '\n\n' + signature + '\n')
+        signature_html='<br>'.join(html.escape(line) for line in signature.splitlines())
+        message.add_alternative(
+            '<div style="font:15px/1.55 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;color:#1d1d1f;max-width:680px">'
+            +markdown_to_html(body[:30000])
+            +'<div style="margin-top:28px;padding-top:16px;border-top:1px solid #dedee3;color:#6e6e73">'+signature_html+'</div></div>',
+            subtype='html',
+        )
         if forwarded_message is not None:
             if kind != 'forward' or recipients != ['Owner']:
                 raise ValueError('Original mail can only be forwarded to Owner.')
@@ -189,7 +258,8 @@ class StaffMail:
         self.outbox.mkdir(parents=True, exist_ok=True)
         path = self.outbox / f'{self.count:02d}-{sender.lower()}.eml'
         path.write_bytes(message.as_bytes())
-        if self.mode == 'draft':
+        delivery_mode = self.internal_mode if reply_address is None else self.mode
+        if delivery_mode == 'draft':
             return f'Email drafted locally: {path.name}. Nothing sent.'
         envelope = list(dict.fromkeys(([reply_address] if reply_address else [self.addresses[n] for n in recipients]) + ([self.bcc] if self.bcc else [])))
         return self._submit(message, path, sender, envelope)

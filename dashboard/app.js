@@ -52,7 +52,7 @@ function render(){
   const hour=new Date().getHours();$('greeting').textContent=(hour<12?'Good morning':hour<18?'Good afternoon':'Good evening')+', James.';
   if(document.activeElement!==$('cleanupDays'))$('cleanupDays').value=String(S.cleanupDays??30);
   $('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[S.mode]||S.mode;
-  $('modeNote').textContent=S.mode==='send'?'Monitor may send on its own':'Approval required to send';
+  $('modeNote').textContent=S.internalMode==='send'?'Staff + CEO automatic · outside mail follows this mode':'All mail follows this mode';
   $('monitor').textContent=S.monitor?'Running':'Stopped';$('monitorNote').textContent=S.monitor?(S.enabled?'Background monitoring enabled':'Monitor running'):'Start in Settings';
   $('google').textContent=S.authorized?'Authorized':'Setup needed';$('monitorLine').textContent=S.monitor?'Running':'Stopped';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;

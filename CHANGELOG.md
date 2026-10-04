@@ -169,3 +169,21 @@
 - Updated web_research.py (`web_research.py`).
 
 <!-- backup 04f2d2b1f55d40cd1fe71c1c526b8ba84fc047ac8b74afb02c262ea06bb218c3 -->
+
+## 2026-10-04 19:30 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated inbox_monitor.py (`inbox_monitor.py`).
+- Updated main.py (`main.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_dashboard_mail.py (`tests/test_dashboard_mail.py`).
+- Updated tests/test_inbox_monitor.py (`tests/test_inbox_monitor.py`).
+- Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
+
+<!-- backup 37829ac2ca78f049c2cba6162710099cc9b2aa0ccd122bc452073ed44a0fb901 -->
