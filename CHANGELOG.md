@@ -91,3 +91,9 @@
 - Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
 
 <!-- backup c32eaf0c028fb890b036dc60c0df78f0d989913bb5516445d6717605a9f13ef7 -->
+
+## 2026-10-03 20:14 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+
+<!-- backup 4f76bbdeada6b1285ffdfccda861788211432d5e229f8fcaf0046d1260b2df55 -->
