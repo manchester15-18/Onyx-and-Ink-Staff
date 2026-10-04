@@ -46,14 +46,14 @@ Each new run overwrites the corresponding completed report. Existing reports fro
 
 Groq currently publishes 30 requests/minute, 1,000 requests/day, 8,000 tokens/minute, and 200,000 tokens/day for this model. Your account may differ: https://console.groq.com/docs/rate-limits.
 
-All agents and HTTP retries share a per-process request/token limiter. Default settings reserve at most 25 requests and an estimated 7,000 input/output tokens per rolling minute. Token estimates are conservative heuristics, not the exact model tokenizer; rate limits can still occur. SDK retries are bounded to three retries and honor Groq's retry delay. Agent-level task restarts are disabled.
+All agents and HTTP retries share a per-process request/token limiter. Default settings reserve at most 25 requests and an estimated 8,000 input/output tokens per rolling minute. Token estimates are conservative heuristics, not the exact model tokenizer; rate limits can still occur. An estimated oversized request is isolated and sent once so Groq can apply its exact tokenizer instead of being mislabeled as a connection failure. Web-search snippets and reports are bounded to keep follow-up turns inside the free-tier budget. SDK retries are bounded to three retries and honor Groq's retry delay. Agent-level task restarts are disabled.
 
 Optional `.env` settings:
 
 ```dotenv
 GROQ_RPM=25
-GROQ_TPM=7000
-GROQ_MAX_COMPLETION_TOKENS=1500
+GROQ_TPM=8000
+GROQ_MAX_COMPLETION_TOKENS=1000
 ```
 
 Set these based on your account's actual limits. The output cap includes reasoning tokens. Large prompts may exceed the free per-minute limit even though the model has a larger context window. Shorten the directive/report history if the program reports that a request exceeds its configured budget. Do not run multiple copies concurrently; the limiter is local to one process and doesn't track other programs or daily consumption. Free-tier pacing messages are expected.

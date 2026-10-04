@@ -26,16 +26,23 @@ class RequestBudget:
         # This is an estimate, not Groq's exact tokenizer or account usage meter.
         prompt = json.dumps({k: payload[k] for k in ("messages", "tools") if k in payload}, ensure_ascii=False)
         tokens = math.ceil(len(prompt) / 3) + 100 + payload.get("max_completion_tokens", 1500)
-        if tokens > self.tpm:
-            raise ValueError(
-                "This request is too large for the configured Groq token budget. "
-                "Shorten the directive/reports or set GROQ_TPM to your account's actual limit."
-            )
+        oversized = tokens > self.tpm
         with self.lock:
             while True:
                 now = time.monotonic()
                 while self.entries and now - self.entries[0][0] >= 61:
                     self.entries.popleft()
+                # The estimate deliberately reserves the entire completion cap and
+                # can exceed actual billing tokens. Isolate a large request instead
+                # of raising inside HTTPX, which the OpenAI-compatible client
+                # misleadingly reports as a network connection failure.
+                if oversized and not self.entries:
+                    print(
+                        "Groq pacing: sending one isolated large request; the provider will enforce the exact token limit.",
+                        flush=True,
+                    )
+                    self.entries.append((now, self.tpm))
+                    return
                 if len(self.entries) < self.rpm and sum(n for _, n in self.entries) + tokens <= self.tpm:
                     self.entries.append((now, tokens))
                     return
@@ -47,7 +54,7 @@ class RequestBudget:
 class GroqLLM(OpenAICompletion):
     """Use the installed native client, without LiteLLM or Gemini dependencies."""
 
-    def __init__(self, api_key, model="qwen/qwen3.8-27b", rpm=25, tpm=7000, max_tokens=1500, timeout=60, max_retries=3):
+    def __init__(self, api_key, model="qwen/qwen3.8-27b", rpm=25, tpm=8000, max_tokens=1000, timeout=60, max_retries=3):
         model = model.removeprefix("groq/")
         self.budget = RequestBudget(rpm, tpm)
         http_client = httpx.Client(event_hooks={"request": [self.budget.before_request]})

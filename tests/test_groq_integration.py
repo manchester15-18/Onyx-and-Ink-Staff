@@ -66,7 +66,11 @@ class GroqTests(unittest.TestCase):
             budget.before_request(request)
         self.assertGreaterEqual(clock[0], 161)
         huge = httpx.Request('POST','https://api.groq.com',json={'messages':[{'content':'x'*2000}]})
-        with self.assertRaises(ValueError): budget.before_request(huge)
+        oversized = RequestBudget(2, 200)
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            oversized.before_request(huge)
+        self.assertEqual(oversized.entries[-1][1], 200)
+        self.assertIn('isolated large request', output.getvalue())
 
     def test_payload_and_full_crew_reports(self):
         calls = []

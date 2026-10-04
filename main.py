@@ -35,7 +35,7 @@ def search_web(query: str) -> str:
     Results include titles, URLs, and concise source text. Cite returned URLs.
     """
     try:
-        return tavily_search(PROJECT_DIR, query, max_results=5)
+        return tavily_search(PROJECT_DIR, query, max_results=3)
     except (ValueError, WebResearchError) as error:
         return f"WEB SEARCH UNAVAILABLE: {error} Continue with labeled assumptions and do not retry this search."
 
@@ -118,7 +118,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     research = "Use web search for current claims." if search_key else "Web search is unavailable; clearly label market ideas as assumptions and list research needed."
     def task(agent, description, filename, context=None):
         return Task(
-            description="CEO directive: {directive}\n\n" + description + " Keep the report under 400 words.",
+            description="CEO directive: {directive}\n\n" + description + " Keep the report under 300 words.",
             expected_output="A concise Markdown report with actions, assumptions, and open decisions.",
             agent=agent,
             context=context or [],
@@ -150,8 +150,8 @@ def main(argv=None):
         search_key = credential("TAVILY_API_KEY", required=False)
         llm = GroqLLM(
             key, model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
-            rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 7000),
-            max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1500),
+            rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 8000),
+            max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1000),
         )
         if not args.check:
             search_key = verified_search_key(search_key)
@@ -173,7 +173,7 @@ def main(argv=None):
         if mail and not args.check:
             mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")
         return 1
-    except APIConnectionError:
+    except (APIConnectionError, ConnectionError):
         print("Could not reach Groq after retries. Check your connection and try later.")
         if mail and not args.check:
             mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")

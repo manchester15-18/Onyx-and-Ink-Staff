@@ -57,7 +57,10 @@ def search(project_dir, query, max_results=5):
         results.append({
             "title": str(item.get("title", ""))[:300],
             "url": url,
-            "content": str(item.get("content", ""))[:1800],
+            # Search snippets are working context for an agent, not full pages.
+            # Keeping them compact prevents a tool result from exhausting Groq's
+            # free per-minute input budget on the agent's next turn.
+            "content": str(item.get("content", ""))[:700],
         })
     if not results:
         return "No Tavily results were found. Continue with clearly labeled assumptions and do not retry the same search."

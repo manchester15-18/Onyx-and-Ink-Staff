@@ -157,3 +157,15 @@
 - Updated dashboard appearance and responsive layout (`dashboard/style.css`).
 
 <!-- backup abab65a7791a67c49c3c0eafac0ddebc5130d4d6c0b1ed5eeecc704c3f7d6926 -->
+
+## 2026-10-04 19:13 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated README.md (`README.md`).
+- Updated groq_llm.py (`groq_llm.py`).
+- Updated main.py (`main.py`).
+- Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
+- Updated tests/test_web_research.py (`tests/test_web_research.py`).
+- Updated web_research.py (`web_research.py`).
+
+<!-- backup 04f2d2b1f55d40cd1fe71c1c526b8ba84fc047ac8b74afb02c262ea06bb218c3 -->
