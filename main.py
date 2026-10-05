@@ -7,7 +7,7 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime
 from pathlib import Path
 
@@ -52,10 +52,14 @@ def _duration_seconds(value):
 
 def quota_retry_seconds(error):
     """Read Groq recovery guidance from headers or its bounded error message."""
-    candidates=[]
+    candidates=[];description=str(error).lower()
     response=getattr(error,'response',None)
     headers=getattr(response,'headers',{}) or {}
-    for key in ('retry-after','x-ratelimit-reset-tokens','x-ratelimit-reset-requests'):
+    request_limited=any(phrase in description for phrase in ('request limit','requests per','request capacity')) and 'token' not in description
+    reset_key='x-ratelimit-reset-requests' if request_limited else 'x-ratelimit-reset-tokens'
+    if not headers.get(reset_key):
+        reset_key='x-ratelimit-reset-requests' if reset_key.endswith('tokens') else 'x-ratelimit-reset-tokens'
+    for key in ('retry-after',reset_key):
         value=headers.get(key)
         if value:
             try:candidates.append(float(value))
@@ -260,16 +264,41 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
 
 
 def run_assignments(tasks):
-    """Run all four permanent departments concurrently through one shared rate budget."""
-    outputs={}
-    with ThreadPoolExecutor(max_workers=4,thread_name_prefix='onyx-staff') as pool:
-        futures={pool.submit(task.execute_sync):name for name,task in tasks.items()}
-        for future in as_completed(futures):
-            name=futures[future];output=future.result()
-            finalize_assignment_report(tasks[name].output_file,name,output)
-            from report_records import auto_export_reference
-            auto_export_reference(PROJECT_DIR,tasks[name].output_file)
-            outputs[name]=output
+    """Run independent departments two at a time so one quota error stops new launches."""
+    outputs={};errors=[];pending=iter(tasks.items());active={}
+    with ThreadPoolExecutor(max_workers=2,thread_name_prefix='onyx-staff') as pool:
+        for _ in range(2):
+            try:name,task=next(pending);active[pool.submit(task.execute_sync)]=name
+            except StopIteration:break
+        halted=False
+        while active:
+            done,_=wait(active,return_when=FIRST_COMPLETED)
+            for future in done:
+                name=active.pop(future)
+                try:output=future.result()
+                except Exception as error:
+                    errors.append(error);halted=True;continue
+                finalize_assignment_report(tasks[name].output_file,name,output)
+                from report_records import auto_export_reference
+                auto_export_reference(PROJECT_DIR,tasks[name].output_file)
+                outputs[name]=output
+            if halted:
+                for future in active:future.cancel()
+                # A request already in flight may finish; no new department starts.
+                for future,name in list(active.items()):
+                    if future.cancelled():continue
+                    try:output=future.result()
+                    except Exception as error:errors.append(error)
+                    else:
+                        finalize_assignment_report(tasks[name].output_file,name,output);outputs[name]=output
+                active.clear();break
+            while len(active)<2:
+                try:name,task=next(pending);active[pool.submit(task.execute_sync)]=name
+                except StopIteration:break
+    if errors:
+        quota_errors=[error for error in errors if isinstance(error,APIStatusError) and error.status_code==429]
+        if quota_errors:raise max(quota_errors,key=quota_retry_seconds)
+        raise errors[0]
     return outputs
 
 

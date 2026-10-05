@@ -7,6 +7,7 @@ import socket
 import sys
 import tempfile
 import unittest
+import threading
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,9 +21,22 @@ from staff_email import StaffMail, STAFF
 
 
 class GroqTests(unittest.TestCase):
+    def test_quota_failure_does_not_launch_queued_departments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            started=[];release=threading.Event()
+            class Assignment:
+                def __init__(self,name):self.name=name;self.output_file=Path(directory)/(name+'.md')
+                def execute_sync(self):
+                    started.append(self.name)
+                    if self.name=='Morgan':release.set();raise RuntimeError('quota')
+                    release.wait(1);return '# '+self.name+'\n\nComplete.'
+            tasks={name:Assignment(name) for name in ('Morgan','Avery','Jordan','Cameron')}
+            with self.assertRaisesRegex(RuntimeError,'quota'):main.run_assignments(tasks)
+            self.assertIn('Morgan',started);self.assertTrue(set(started).issubset({'Morgan','Avery'}))
+
     def test_provider_retry_time_is_parsed_and_buffered(self):
         class Limited(Exception):
-            response=type('Response',(),{'headers':{'x-ratelimit-reset-tokens':'6m54.72s'}})()
+            response=type('Response',(),{'headers':{'x-ratelimit-reset-tokens':'6m54.72s','x-ratelimit-reset-requests':'1h0m0s'}})()
         wait=main.quota_retry_seconds(Limited('Please try again in 3m18.72s'))
         self.assertEqual(wait,444)
 

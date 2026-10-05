@@ -369,6 +369,8 @@
 - Prevented routine scheduler checks and service restarts from sending duplicate activation notices.
 - Fixed repeated staff-run failures by honoring Groq's usage-limit recovery time and removing retry bursts.
 - Added an automatic-resume countdown to the dashboard when provider capacity is temporarily exhausted.
+- Made concurrent agents honor the longest recovery window returned by Groq before restarting the team.
+- Limited autonomous concurrency to two departments and stopped launching queued work after the first quota error.
 
 ## 2026-10-05 15:16 EDT — Application update
 
@@ -382,3 +384,10 @@
 - Updated tests/test_staff_autonomy.py (`tests/test_staff_autonomy.py`).
 
 <!-- backup ada19a6b55554f16c2b5d4dd7ee7588a534e17fe60b3031a5df40859474115f1 -->
+
+## 2026-10-05 15:24 EDT — Application update
+
+- Updated main.py (`main.py`).
+- Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
+
+<!-- backup 0457dea876f79efd34498eab024002200af977cd0f88b02e9ca82dac09cbe10f -->
