@@ -20,6 +20,12 @@ from staff_email import StaffMail, STAFF
 
 
 class GroqTests(unittest.TestCase):
+    def test_provider_retry_time_is_parsed_and_buffered(self):
+        class Limited(Exception):
+            response=type('Response',(),{'headers':{'x-ratelimit-reset-tokens':'6m54.72s'}})()
+        wait=main.quota_retry_seconds(Limited('Please try again in 3m18.72s'))
+        self.assertEqual(wait,444)
+
     def test_content_blocks_model_prefix_and_tool_metadata(self):
         llm=GroqLLM('offline-test-key',model='groq/openai/gpt-oss-120b')
         try:

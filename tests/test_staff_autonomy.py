@@ -1,4 +1,6 @@
 import tempfile
+import json
+import time
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -32,6 +34,16 @@ class StaffAutonomyTests(unittest.TestCase):
             directive=launch.call_args.args[0][-1]
             self.assertIn('Existing plan',directive);self.assertIn('Do not repeat completed work',directive)
             self.assertIn('--assignment-id',launch.call_args.args[0]);self.assertIn('--project',launch.call_args.args[0])
+
+    def test_failed_run_honors_provider_cooldown_without_relaunching(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'work').mkdir();ready=time.time()+900
+            (root/'work'/'groq-cooldown.json').write_text(json.dumps({'readyEpoch':ready}))
+            manager=StaffAutonomy(root);manager.configure({'enabled':True,'start':'','stop':'','objective':'Continue approved work without retry bursts.'})
+            process=Mock(returncode=1);process.poll.return_value=1;manager.process=process
+            with patch('staff_autonomy.subprocess.Popen') as launch:manager.tick()
+            self.assertFalse(launch.called)
+            self.assertGreaterEqual(manager.load()['capacityReadyEpoch'],ready-1)
 
 
 if __name__=='__main__':unittest.main()

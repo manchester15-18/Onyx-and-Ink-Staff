@@ -66,7 +66,7 @@ function render(){
   $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
   $('saveMode').disabled=false;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
-  const au=S.autonomy||{},staffWork=S.workStatus||{};$('autonomyStatus').textContent=au.running?(staffWork.detail||'Agents are working independently'):au.enabled?(au.inWindow?(au.capacityWaitSeconds?'Usage pacing · next assignments resume automatically':'Enabled · preparing the next assignments'):'Enabled · outside scheduled hours'):'Stopped';
+  const au=S.autonomy||{},staffWork=S.workStatus||{};$('autonomyStatus').textContent=au.running?(staffWork.detail||'Agents are working independently'):au.enabled?(au.inWindow?(au.capacityWaitSeconds?((staffWork.detail||'Usage capacity reached')+' · resumes automatically in about '+Math.ceil(au.capacityWaitSeconds/60)+' min'):'Enabled · preparing the next assignments'):'Enabled · outside scheduled hours'):'Stopped';
   if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoObjective').value=au.objective||'';autonomyReady=true}
   $('stopAutonomy').disabled=!au.enabled&&!au.running;
   const items=attention();$('attnCount').textContent=items.length;
@@ -264,8 +264,8 @@ on('saveMode','click',async()=>{const mode=$('modeSelect').value;if(mode==='send
 on('start','click',async()=>{if(S.mode==='send'&&!await sure('Start the monitor with live email sending enabled?'))return;act('start')});
 on('stop','click',()=>act('stop'));on('close','click',()=>$('detail').close());
 const autonomyData=(runNow=false,enabled=$('autoEnabled').checked)=>({enabled,start:$('autoStart').value,stop:$('autoStop').value,objective:$('autoObjective').value.trim(),runNow});
-on('saveAutonomy','click',async()=>{try{await api('autonomy',autonomyData());autonomyReady=false;toast('Autonomous staff schedule saved.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
-on('runAutonomy','click',async()=>{if(!await sure('Start all four agents now? Groq pacing will manage request and token capacity.','Start now'))return;try{await api('autonomy',autonomyData(true,true));autonomyReady=false;toast('Autonomous staff started.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('saveAutonomy','click',async()=>{try{const r=await api('autonomy',autonomyData());autonomyReady=false;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('runAutonomy','click',async()=>{if(!await sure('Start all four agents now? Groq pacing will manage request and token capacity.','Start now'))return;try{const r=await api('autonomy',autonomyData(true,true));autonomyReady=false;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('stopAutonomy','click',async()=>{if(!await sure('Stop autonomous staff and disable future scheduled work?','Stop staff'))return;try{await api('autonomy',autonomyData(false,false));autonomyReady=false;toast('Autonomous staff stopped.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('showWifiPassword','click',async()=>{try{$('wifiPassword').textContent=(await api('wifi-password',{})).password}catch(e){$('wifiPassword').textContent=e.message}});
 on('saveTelegram','click',async()=>{try{await api('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';sig='';await refresh();toast('Telegram settings saved.')}catch(e){toast(e.message,'bad')}});

@@ -20,7 +20,7 @@ from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dotenv import dotenv_values, set_key
 from dashboard_mail import Mailbox
-from staff_email import StaffMail,signature_settings,save_signature_settings,reset_signature_settings
+from staff_email import StaffMail,signature_settings,save_signature_settings,reset_signature_settings,valid_address
 from report_format import normalize_report
 from delivery_tracking import check_delivery
 from inbox_state import InboxState
@@ -210,6 +210,34 @@ def mail_from_config(config, mode=None):
     return StaffMail.from_env(ROOT, mode=mode, config=config)
 
 
+def configure_autonomy(data):
+    """Apply settings and send exactly one notice for an off-to-on transition."""
+    was_enabled=AUTONOMY.load().get('enabled') is True
+    state=AUTONOMY.configure(data)
+    if not state['enabled']:
+        AUTONOMY.stop()
+    else:
+        AUTONOMY.tick()
+    confirmation=''
+    if state['enabled'] and not was_enabled:
+        schedule=(state['start']+'–'+state['stop']) if state['start'] and state['stop'] else 'All day until you turn autonomous staff off'
+        objective=state['objective'].strip()
+        body=('CEO James and Vice President Jaunee,\n\nAutonomous staff is now on.\n\n'
+              f'Working hours: {schedule}\nObjective: {objective[:500]}\n\n'
+              'Morgan, Avery, Jordan, and Cameron will continue independent assignments during these hours. '
+              'You will still receive a separate email if a run needs attention.')
+        try:
+            mail=mail_from_config(dotenv_values(ROOT/'.env'))
+            recipients=['Owner']+(['Jaunee'] if valid_address(mail.addresses.get('Jaunee','')) else [])
+            confirmation=mail.deliver('Morgan',recipients,'Autonomous staff is now on',body,kind='message',important=True)
+        except (ValueError,OSError):
+            confirmation='Autonomous staff started, but the activation email could not be prepared.'
+    message='Autonomous staff settings saved.'
+    if confirmation:
+        message='Autonomous staff enabled. '+('Activation email accepted by the mail server.' if 'accepted by mail server' in confirmation else confirmation)
+    return state,message
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def allowed(self):
@@ -387,11 +415,9 @@ class Handler(BaseHTTPRequestHandler):
                     elif data['mode']=='off':set_desired(False)
                     return self.reply(200,{'message':'Email mode saved. The inbox monitor was restarted with the new setting.' if restart and data['mode']!='off' else 'Email mode saved.'})
                 elif self.path=='/api/autonomy':
-                    try:state=AUTONOMY.configure(data)
+                    try:state,message=configure_autonomy(data)
                     except ValueError as error:return self.reply(400,{'error':str(error)})
-                    if not state['enabled']:AUTONOMY.stop()
-                    else:AUTONOMY.tick()
-                    return self.reply(200,{'message':'Autonomous staff settings saved.'})
+                    return self.reply(200,{'message':message})
                 elif self.path=='/api/start':
                     start_monitor();set_desired(True)
                 elif self.path=='/api/stop':

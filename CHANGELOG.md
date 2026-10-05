@@ -362,3 +362,23 @@
 - Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
 
 <!-- backup f3032133b3829ab01020673ce2016d5f471b275cd21dd92ec13e75c3bd8509c8 -->
+# 2026-10-05 — Autonomous staff activation confirmation
+
+- Added a one-time executive email when autonomous staff changes from off to on.
+- Included the active hours and objective, with James addressed as CEO and Jaunee as Vice President.
+- Prevented routine scheduler checks and service restarts from sending duplicate activation notices.
+- Fixed repeated staff-run failures by honoring Groq's usage-limit recovery time and removing retry bursts.
+- Added an automatic-resume countdown to the dashboard when provider capacity is temporarily exhausted.
+
+## 2026-10-05 15:16 EDT — Application update
+
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated main.py (`main.py`).
+- Updated staff_autonomy.py (`staff_autonomy.py`).
+- Updated tests/test_dashboard.py (`tests/test_dashboard.py`).
+- Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
+- Updated tests/test_staff_autonomy.py (`tests/test_staff_autonomy.py`).
+
+<!-- backup ada19a6b55554f16c2b5d4dd7ee7588a534e17fe60b3031a5df40859474115f1 -->

@@ -46,6 +46,11 @@ def run_active(root):
     return False
 
 
+def provider_ready_epoch(root):
+    try:return float(json.loads((Path(root)/'work'/'groq-cooldown.json').read_text()).get('readyEpoch') or 0)
+    except (OSError,ValueError,TypeError):return 0
+
+
 class StaffAutonomy:
     def __init__(self,root):
         self.root=Path(root);self.path=self.root/'work'/'staff-autonomy.json';self.process=None
@@ -79,8 +84,15 @@ class StaffAutonomy:
     def tick(self):
         state=self.load()
         if self.process and self.process.poll() is not None:
-            pause=61 if self.process.returncode==0 else 300
+            if self.process.returncode==0:
+                pause=61
+                try:(self.root/'work'/'groq-cooldown.json').unlink()
+                except FileNotFoundError:pass
+            else:pause=max(300,provider_ready_epoch(self.root)-time.time())
             state.update({'lastFinished':datetime.now().astimezone().isoformat(timespec='seconds'),'lastExit':self.process.returncode,'capacityReadyEpoch':time.time()+pause});self.process=None;self.save(state)
+        provider_ready=provider_ready_epoch(self.root)
+        if provider_ready>float(state.get('capacityReadyEpoch') or 0):
+            state['capacityReadyEpoch']=provider_ready;self.save(state)
         forced=state.get('runNowPending') is True
         if not state['enabled'] or (not forced and not in_window(state['start'],state['stop'])) or run_active(self.root):return
         if not forced and time.time()<float(state.get('capacityReadyEpoch') or 0):return

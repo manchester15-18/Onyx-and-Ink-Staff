@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -41,6 +42,38 @@ SAMPLE_INVENTORY = {
     "puzzle": "85 units (120-piece Sublimation Blanks)",
     "bookmark": "300 units (Aluminum Gloss)",
 }
+
+
+def _duration_seconds(value):
+    match=re.search(r'(?:(\d+)h)?(?:(\d+)m)?([\d.]+)s',str(value or ''),re.I)
+    if not match:return None
+    return int(match.group(1) or 0)*3600+int(match.group(2) or 0)*60+float(match.group(3))
+
+
+def quota_retry_seconds(error):
+    """Read Groq recovery guidance from headers or its bounded error message."""
+    candidates=[]
+    response=getattr(error,'response',None)
+    headers=getattr(response,'headers',{}) or {}
+    for key in ('retry-after','x-ratelimit-reset-tokens','x-ratelimit-reset-requests'):
+        value=headers.get(key)
+        if value:
+            try:candidates.append(float(value))
+            except (TypeError,ValueError):
+                parsed=_duration_seconds(value)
+                if parsed is not None:candidates.append(parsed)
+    for value in re.findall(r'try again in\s+([\dhms.]+)',str(error),re.I):
+        parsed=_duration_seconds(value)
+        if parsed is not None:candidates.append(parsed)
+    # A missing reset hint should pause rather than hammer a daily allowance.
+    return max(60,min(86400,int(max(candidates,default=1800)+30)))
+
+
+def save_provider_cooldown(root,seconds):
+    path=Path(root)/'work'/'groq-cooldown.json';path.parent.mkdir(exist_ok=True)
+    ready=time.time()+seconds
+    temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps({'readyEpoch':ready,'reason':'usage-limit'},indent=2));temporary.chmod(0o600);temporary.replace(path)
+    return ready
 
 
 @tool("Search the live web with Tavily")
@@ -267,6 +300,7 @@ def main(argv=None):
             key, model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
             rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 8000),
             max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1000),
+            max_retries=0,
         )
         if not args.check:
             search_key = verified_search_key(search_key)
@@ -290,11 +324,18 @@ def main(argv=None):
         print(f"Reports saved to {project_name}: {report_dir}")
         return 0
     except APIStatusError as error:
-        if progress:progress.write(status='failed',detail='Groq stopped one or more assignments before completion.')
-        messages = {401: "Groq rejected the API key. Check GROQ_API_KEY.", 403: "Groq denied model access. Check model permissions in your Groq account.", 404: "Groq model not found. Check GROQ_MODEL.", 429: "Groq quota is exhausted after bounded retries. Check your account's request, token, and daily limits.", 400: "Groq rejected a request. Check model compatibility and the prompt size."}
+        retry_ready=None
+        if error.status_code==429:
+            retry_ready=save_provider_cooldown(PROJECT_DIR,quota_retry_seconds(error))
+            resume=datetime.fromtimestamp(retry_ready).astimezone().strftime('%-I:%M %p')
+            if progress:progress.write(status='waiting',detail='Groq usage limit reached. Autonomous work will resume automatically around '+resume+'.')
+        elif progress:progress.write(status='failed',detail='Groq stopped one or more assignments before completion.')
+        messages = {401: "Groq rejected the API key. Check GROQ_API_KEY.", 403: "Groq denied model access. Check model permissions in your Groq account.", 404: "Groq model not found. Check GROQ_MODEL.", 429: "Groq usage capacity is exhausted. Autonomous staff will resume at the provider reset time.", 400: "Groq rejected a request. Check model compatibility and the prompt size."}
         print(messages.get(error.status_code, f"Groq returned HTTP {error.status_code} after retries. Try later."))
         if mail and not args.check:
-            mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")
+            if retry_ready:
+                mail.failure('Groq reached its usage limit. Autonomous staff paused and will resume automatically around '+datetime.fromtimestamp(retry_ready).astimezone().strftime('%-I:%M %p')+'.')
+            else:mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")
         return 1
     except (APIConnectionError, ConnectionError):
         if progress:progress.write(status='failed',detail='The AI service could not be reached.')

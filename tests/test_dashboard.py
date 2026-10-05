@@ -9,6 +9,17 @@ from email.message import EmailMessage
 import dashboard
 
 class DashboardTests(unittest.TestCase):
+    def test_autonomy_activation_email_is_sent_once(self):
+        state={'enabled':True,'start':'07:30','stop':'23:30','objective':'Continue approved work and record results.'}
+        autonomy=Mock();autonomy.load.side_effect=[{'enabled':False},{'enabled':True}];autonomy.configure.return_value=state
+        mail=Mock();mail.addresses={'Jaunee':'vp@example.com'};mail.deliver.return_value='Email accepted by mail server; inbox delivery is not verified.'
+        with patch.object(dashboard,'AUTONOMY',autonomy),patch.object(dashboard,'mail_from_config',return_value=mail),patch.object(dashboard,'dotenv_values',return_value={}):
+            _,first=dashboard.configure_autonomy({'enabled':True})
+            _,second=dashboard.configure_autonomy({'enabled':True})
+        self.assertIn('Activation email accepted',first);self.assertEqual(second,'Autonomous staff settings saved.')
+        mail.deliver.assert_called_once()
+        call=mail.deliver.call_args;self.assertEqual(call.args[1],['Owner','Jaunee']);self.assertTrue(call.kwargs['important'])
+
     def test_workspace_status_distinguishes_failed_authorization(self):
         with tempfile.TemporaryDirectory() as d,patch.object(dashboard,'ROOT',Path(d)),patch.object(dashboard,'WORKSPACE_SETUP',None):
             work=Path(d)/'work';work.mkdir();(work/'workspace-status.json').write_text('{"state":"failed","message":"Sign-in failed."}')
