@@ -11,6 +11,14 @@ class MailboxTests(unittest.TestCase):
         with patch.object(mail,'request',return_value=msg):result=mail.read('abc123')
         self.assertEqual(result['body'],'Hello');self.assertEqual(result['replyTo'],'customer@example.com');self.assertEqual(result['references'],'<request@example.com>')
         with self.assertRaises(ValueError):mail.read('../../private')
+    def test_trusted_sent_staff_message_replies_to_staff_alias(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);(root/'.env').write_text('CAMERON_EMAIL=hr@example.com\n')
+            mail=Mailbox(root)
+            msg={'id':'abc123','labelIds':['SENT'],'payload':{'headers':[{'name':'From','value':'Cameron <shared@example.com>'},{'name':'Reply-To','value':'hr@example.com'},{'name':'X-Onyx-Ink-Kind','value':'message'}], 'mimeType':'text/plain','body':{'data':base64.urlsafe_b64encode(b'Hello').decode()}}}
+            with patch.object(mail,'request',return_value=msg):result=mail.read('abc123')
+            self.assertEqual(result['replyTo'],'hr@example.com');self.assertTrue(result['sent'])
     def test_html_is_text_no_scripts_and_attachment_names_only(self):
         mail=Mailbox(Path('/tmp'))
         encoded=base64.urlsafe_b64encode(b'<p>Hello</p><script>unsafe()</script>').decode()
@@ -31,10 +39,11 @@ class AliasTests(unittest.TestCase):
             root=Path(d);(root/'.env').write_text('AVERY_EMAIL=marketing@example.com\nOWNER_EMAIL=ceo@example.com\n')
             mail=Mailbox(root)
             with patch.object(mail,'request',return_value={'messages':[]}) as request:
-                mail.list(mailbox='Avery');self.assertIn('to:marketing@example.com',request.call_args.args[1]['q'])
-                mail.list(mailbox='Owner');self.assertIn('to:ceo@example.com',request.call_args.args[1]['q'])
+                mail.list(mailbox='Avery');self.assertIn('to:marketing@example.com',request.call_args.args[1]['q']);self.assertNotIn('labelIds',request.call_args.args[1]);self.assertIn('in:sent',request.call_args.args[1]['q'])
+                mail.list(mailbox='Owner');self.assertIn('to:ceo@example.com',request.call_args.args[1]['q']);self.assertNotIn('deliveredto:',request.call_args.args[1]['q'])
                 mail.list(mailbox='Avery');self.assertEqual(request.call_count,2)
                 with self.assertRaises(ValueError):mail.list(mailbox='unknown')
+                mail.list(mailbox='Shared');self.assertEqual(request.call_args.args[1]['labelIds'],'INBOX')
 
 class ManualReplyTests(unittest.TestCase):
     def test_ceo_reply_sender_bcc_and_human_headers(self):

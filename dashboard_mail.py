@@ -30,15 +30,20 @@ class Mailbox:
             config=dotenv_values(self.root/'.env')
             names={'Owner':'OWNER_EMAIL','Morgan':'MORGAN_EMAIL','Avery':'AVERY_EMAIL','Jordan':'JORDAN_EMAIL','Cameron':'CAMERON_EMAIL','Shared':'GOOGLE_MAIL_USER'}
             if mailbox != 'all' and mailbox not in names:raise ValueError('Unknown inbox.')
-            params={'labelIds':'INBOX','maxResults':40}
+            # Named mailboxes are virtual views over aliases that share one Google
+            # account. Gmail often stores alias-to-alias mail only in Sent, so an
+            # INBOX-only query silently loses internal messages.
+            params={'maxResults':40}
+            if mailbox in ('all','Shared'):
+                params['labelIds']='INBOX'
             if page_token:
                 if not isinstance(page_token,str) or len(page_token)>500 or not re.fullmatch('[A-Za-z0-9_-]+',page_token):raise ValueError('Invalid inbox page.')
                 params['pageToken']=page_token
-            if mailbox != 'all':
+            if mailbox not in ('all','Shared'):
                 from staff_email import valid_address
                 address=config.get(names[mailbox],'')
                 if not valid_address(address):raise ValueError('Inbox address is not configured.')
-                params['q']='{to:'+address+' deliveredto:'+address+' cc:'+address+'}'
+                params['q']='{in:inbox in:sent} {to:'+address+' cc:'+address+'}'
             cache_key=(mailbox,page_token)
             if not refresh and cache_key in self.cache and time.monotonic()-self.cached_at.get(cache_key,0)<60:self.next_page=self.next_pages.get(cache_key);return self.cache[cache_key]
             page=self.request('messages',params)
@@ -48,7 +53,8 @@ class Mailbox:
                 msg=self.request('messages/'+entry['id'],{'format':'metadata','metadataHeaders':['From','To','Subject','Date']})
                 h=self.headers(msg)
                 return {'id':msg['id'],'from':h.get('from',''),'to':h.get('to',''),'subject':h.get('subject','(No subject)'),
-                    'date':h.get('date',''),'received':int(msg.get('internalDate','0')),'snippet':__import__('html').unescape(msg.get('snippet',''))[:180],'unread':'UNREAD' in msg.get('labelIds',[])}
+                    'date':h.get('date',''),'received':int(msg.get('internalDate','0')),'snippet':__import__('html').unescape(msg.get('snippet',''))[:180],
+                    'unread':'UNREAD' in msg.get('labelIds',[]),'sent':'SENT' in msg.get('labelIds',[])}
             from concurrent.futures import ThreadPoolExecutor
             with ThreadPoolExecutor(max_workers=6) as pool:result=list(pool.map(metadata,entries))
             self.cache[cache_key]=result;self.cached_at[cache_key]=time.monotonic();return result
@@ -79,9 +85,15 @@ class Mailbox:
             parser=Plain();parser.feed('\n'.join(html));texts=[''.join(parser.text)]
         mid=h.get('message-id','');mid=mid if re.fullmatch(r'<[^\s<>]+>',mid) else None
         refs=' '.join(re.findall(r'<[^\s<>]+>',h.get('references',''))[-10:]+([mid] if mid else []))
+        reply_to=parseaddr(h.get('from',''))[1]
+        labels=set(msg.get('labelIds',[]));config=dotenv_values(self.root/'.env')
+        internal_addresses={str(config.get(key,'')).lower() for key in ('MORGAN_EMAIL','AVERY_EMAIL','JORDAN_EMAIL','CAMERON_EMAIL')}
+        requested_reply=parseaddr(h.get('reply-to',''))[1]
+        if 'SENT' in labels and h.get('x-onyx-ink-kind') in ('message','handoff','failure') and requested_reply.lower() in internal_addresses:
+            reply_to=requested_reply
         return {'id':msg['id'],'thread':msg.get('threadId'),'from':h.get('from',''),'to':h.get('to',''),'subject':h.get('subject',''),
             'cc':h.get('cc',''),'date':h.get('date',''),'body':'\n'.join(texts)[:100000] or '(No readable text body.)','attachments':attachments,'attachmentDetails':attachment_details,
-            'replyTo':parseaddr(h.get('from',''))[1], 'messageId':mid,'references':refs}
+            'replyTo':reply_to, 'messageId':mid,'references':refs,'sent':'SENT' in labels}
 
     def page(self,mailbox='all',refresh=False,page_token=None,view='visible'):
         if view not in ('visible','hidden','all'):raise ValueError('Invalid dashboard inbox view.')

@@ -249,3 +249,11 @@
 - Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
 
 <!-- backup 7a6f79c91a49fdf4a097fdfc2e36967e38c83056d69754f8be76f7ebb355a52b -->
+
+## 2026-10-05 13:37 EDT — Application update
+
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated Gmail inbox access and message handling (`dashboard_mail.py`).
+- Updated tests/test_dashboard_mail.py (`tests/test_dashboard_mail.py`).
+
+<!-- backup a1e6797235407466d0d7e9714830147cc331b5303c22d4773414110b58aa45b6 -->
