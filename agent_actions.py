@@ -13,13 +13,14 @@ import requests
 from dotenv import dotenv_values
 from workspace_tools import Workspace
 from staff_email import StaffMail, STAFF, valid_address
+from report_projects import active_project, ensure_project, project_slug
 
 CATALOG = '''Actions (use exact names and argument keys):
-report {title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]};
+report {project:project name optional,title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]};
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
 design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; staff_reports {name:marketing,storefront,policy,operations,or all}; workspace_files {};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
-search {query}; webpage {url}. Workspace creation/upload is automatic. Email to Owner or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Email Owner only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save locally; document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
+search {query}; webpage {url}. Workspace creation/upload is automatic. Email to Owner or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Email Owner only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
 
 class Actions:
     def __init__(self, root, agent, run_id, delete_ids=None):
@@ -44,6 +45,18 @@ class Actions:
         with closing(self.db()) as db:
             db.execute('INSERT INTO files(id,name,agent,kind) VALUES (?,?,?,?)',(identifier,title,self.agent,kind));db.commit()
         return {'file_id':identifier,'name':title,'url':'/api/artifact?id='+identifier}
+    def save_report(self,title,text,project=None):
+        if project:
+            slug,label,folder=ensure_project(self.root,project,str(project),activate=False)
+        else:
+            slug,label,folder=active_project(self.root)
+        assignment=folder/'agent-drafts'/self.agent.lower();assignment.mkdir(parents=True,exist_ok=True)
+        cleaned=self.clean(text);identifier=uuid.uuid4().hex
+        path=assignment/(project_slug(title)+'-'+identifier[:8]+'.md')
+        path.write_text(cleaned+('' if cleaned.endswith('\n') else '\n'));path.chmod(0o600)
+        result=self.save(title,cleaned.encode(),'.md','project-report')
+        result.update({'project':slug,'project_name':label,'dashboard':'/reports'})
+        return result
     def file(self,identifier):
         if not re.fullmatch('[a-f0-9]{32}',str(identifier)):raise ValueError('Choose a generated staff file.')
         with closing(self.db()) as db:row=db.execute('SELECT name FROM files WHERE id=?',(identifier,)).fetchone()
@@ -81,7 +94,7 @@ class Actions:
         if self.agent not in STAFF:raise ValueError('Choose a staff agent.')
         if action in ('report','document','spreadsheet','presentation'):
             title=self.text(a,'title',160)
-            if action=='report':return self.save(title,self.clean(self.text(a,'text')).encode(),'.md','report')
+            if action=='report':return self.save_report(title,self.text(a,'text'),a.get('project'))
             if action=='document':return self.workspace.create_doc(title,self.clean(self.text(a,'text')))
             if action=='spreadsheet':
                 values=a.get('values')
@@ -135,9 +148,10 @@ class Actions:
             selected=choices.items() if name=='all' else [(name,choices[name])]
             reports={}
             for label,filename in selected:
-                path=self.root/'reports'/filename
-                try:reports[label]=path.read_text()[:5000]
-                except FileNotFoundError:reports[label]='No saved report yet.'
+                _,_,folder=active_project(self.root)
+                matches=sorted(folder.glob('**/'+filename),key=lambda path:path.stat().st_mtime,reverse=True)
+                try:reports[label]=matches[0].read_text()[:5000]
+                except IndexError:reports[label]='No saved report yet.'
             return {'dashboard':'/reports','reports':reports}
         if action=='upload':return self.workspace.upload(self.file(a.get('file_id','')),self.file(a.get('file_id','')).name)
         if action=='workspace_files':return self.workspace.list_files()

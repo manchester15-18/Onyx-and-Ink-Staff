@@ -14,7 +14,7 @@ if($('loginForm')){
 const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach the AI service/;
-let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0,signaturesReady=false,autonomyReady=false;
+let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,reportProject='',pal=0,signaturesReady=false,autonomyReady=false;
 const busy=new Set();let inboxMessages=[],inboxNext=null,inboxVersion=0,readVersion=0,replyAttachments=[],composeAttachments=[],uploading=0;
 
 const isBad=a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted';
@@ -66,8 +66,8 @@ function render(){
   $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
   $('saveMode').disabled=false;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
-  const au=S.autonomy||{},cy=S.cycle||{};$('autonomyStatus').textContent=au.running?((cy.cycle||'Current cycle')+' · '+(cy.phase||'Working')):au.enabled?(au.inWindow?'Enabled · waiting for the next cycle':'Enabled · outside scheduled hours'):'Stopped';
-  if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoInterval').value=String(au.interval||60);$('autoObjective').value=au.objective||'';autonomyReady=true}
+  const au=S.autonomy||{},staffWork=S.workStatus||{};$('autonomyStatus').textContent=au.running?(staffWork.detail||'Agents are working independently'):au.enabled?(au.inWindow?(au.capacityWaitSeconds?'Usage pacing · next assignments resume automatically':'Enabled · preparing the next assignments'):'Enabled · outside scheduled hours'):'Stopped';
+  if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoObjective').value=au.objective||'';autonomyReady=true}
   $('stopAutonomy').disabled=!au.enabled&&!au.running;
   const items=attention();$('attnCount').textContent=items.length;
   $('needs').replaceChildren(...(items.length?items.map(([lvl,t,d,go])=>{const n=el('div','nd '+(lvl==='w'?'w':''));n.append(el('b','',t),el('small','',d));
@@ -79,6 +79,8 @@ function render(){
   $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
   if(!signaturesReady){$('signatureList').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role));const input=el('textarea');input.dataset.signature=a.name;input.maxLength=1200;input.rows=6;input.value=S.signatures?.[a.name]||'';input.setAttribute('aria-label',a.name+' email signature');c.append(input);return c}));signaturesReady=true}
   $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
+  if(!reportProject||!S.reportProjects?.some(p=>p.id===reportProject))reportProject=S.activeReportProject||S.reportProjects?.[0]?.id||'';
+  const projectOptions=S.reportProjects||[];$('reportProject').replaceChildren(...projectOptions.map(p=>{const o=el('option','',p.name);o.value=p.id;return o}));$('reportProject').value=reportProject;
   renderOutbox();renderReports();renderFiles();
   const ws=S.integrations?.workspace||{},wsLabels={connected:'Connected'+(ws.account?' as '+ws.account:'')+' · Workspace actions are automatic',authorizing:'Waiting for Google sign-in…',failed:ws.message||'Workspace connection needs attention',not_connected:'Google Workspace sign-in needed'};
   $('workspaceStatus').textContent=wsLabels[ws.state]||'Google Workspace sign-in needed';
@@ -133,9 +135,12 @@ on('dismissBad','click',async()=>{const ids=S.activity.filter(isBad).map(a=>a.id
 function renderReports(){
   const names=['all',...new Set(S.agents.map(a=>a.name)),'Unassigned'];
   $('reportFilters').replaceChildren(...names.map(n=>{const b=el('button',n===repFilter?'on':'',n==='all'?'All':n);b.onclick=()=>{repFilter=n;renderReports()};return b}));
-  const list=S.reports.map((r,i)=>[r,i]).filter(([r])=>repFilter==='all'||r.agent===repFilter);
+  const list=S.reports.map((r,i)=>[r,i]).filter(([r])=>r.project===reportProject&&(repFilter==='all'||r.agent===repFilter));
   $('reportList').replaceChildren(...(list.length?list.map(([r,i])=>{const b=el('button','m'+(i===repIdx?' on':''));b.append(el('b','',r.name),el('small','',r.agent));b.onclick=()=>{repIdx=i;renderReports()};return b}):[el('p','empty','No saved reports for this selection yet.')]));
-  renderReport(repIdx!==null&&S.reports[repIdx]?S.reports[repIdx].body:'Select a report.')}
+  const selected=repIdx!==null&&S.reports[repIdx]?.project===reportProject?S.reports[repIdx]:null;
+  renderReport(selected?selected.body:'Select a report.')}
+on('reportProject','change',async()=>{const chosen=$('reportProject').value;if(!chosen)return;try{const r=await api('report-project',{name:chosen});reportProject=r.project;repIdx=null;$('projectNotice').textContent=r.message;renderReports();sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('createProject','click',async()=>{const name=$('newProjectName').value.trim();if(!name){toast('Enter a project name.','warn');return}$('createProject').disabled=true;try{const r=await api('report-project',{name});reportProject=r.project;repIdx=null;$('newProjectName').value='';$('projectNotice').textContent=r.message;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('createProject').disabled=false}});
 
 /* ---------- navigation ---------- */
 function showPage(){let p=location.pathname.split('/')[1]||'overview';if(!PAGES.includes(p))p='overview';
@@ -249,10 +254,10 @@ const act=async(p,d)=>{try{await api(p,d);toast('Settings updated.');sig='';awai
 on('saveMode','click',async()=>{const mode=$('modeSelect').value;if(mode==='send'&&!await sure('Enable live sending? The running monitor will send agent replies and forward outside emails to the CEO.'))return;act('mode',{mode})});
 on('start','click',async()=>{if(S.mode==='send'&&!await sure('Start the monitor with live email sending enabled?'))return;act('start')});
 on('stop','click',()=>act('stop'));on('close','click',()=>$('detail').close());
-const autonomyData=(runNow=false,enabled=$('autoEnabled').checked)=>({enabled,start:$('autoStart').value,stop:$('autoStop').value,interval:Number($('autoInterval').value),objective:$('autoObjective').value.trim(),runNow});
+const autonomyData=(runNow=false,enabled=$('autoEnabled').checked)=>({enabled,start:$('autoStart').value,stop:$('autoStop').value,objective:$('autoObjective').value.trim(),runNow});
 on('saveAutonomy','click',async()=>{try{await api('autonomy',autonomyData());autonomyReady=false;toast('Autonomous staff schedule saved.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
-on('runAutonomy','click',async()=>{if(!await sure('Start an autonomous staff cycle now? This uses Groq and may take several minutes.','Run now'))return;try{await api('autonomy',autonomyData(true,true));autonomyReady=false;toast('Autonomous staff cycle started.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
-on('stopAutonomy','click',async()=>{if(!await sure('Stop autonomous staff and disable future scheduled cycles?','Stop staff'))return;try{await api('autonomy',autonomyData(false,false));autonomyReady=false;toast('Autonomous staff stopped.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('runAutonomy','click',async()=>{if(!await sure('Start all four agents now? Groq pacing will manage request and token capacity.','Start now'))return;try{await api('autonomy',autonomyData(true,true));autonomyReady=false;toast('Autonomous staff started.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('stopAutonomy','click',async()=>{if(!await sure('Stop autonomous staff and disable future scheduled work?','Stop staff'))return;try{await api('autonomy',autonomyData(false,false));autonomyReady=false;toast('Autonomous staff stopped.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('showWifiPassword','click',async()=>{try{$('wifiPassword').textContent=(await api('wifi-password',{})).password}catch(e){$('wifiPassword').textContent=e.message}});
 on('saveTelegram','click',async()=>{try{await api('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';sig='';await refresh();toast('Telegram settings saved.')}catch(e){toast(e.message,'bad')}});
 on('pairTelegram','click',async()=>{try{const r=await api('telegram-pair',{});$('telegramPairCode').textContent='In your bot’s private chat, send /pair '+r.code+' within 10 minutes. This grants access to the shared staff conversations.'}catch(e){$('telegramPairCode').textContent=e.message}});

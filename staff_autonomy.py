@@ -1,4 +1,4 @@
-"""Persistent, scheduled staff work cycles managed by the dashboard."""
+"""Persistent staff assignments managed by the dashboard operating hours."""
 import fcntl
 import json
 import os
@@ -9,6 +9,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from report_projects import active_project
 
 DEFAULT_OBJECTIVE='Continue advancing the current Onyx & Ink priorities. Start the highest-priority unfinished work immediately, make only verifiable progress, and ask the CEO one focused question only when a decision blocks the next useful action.'
 
@@ -16,7 +17,7 @@ DEFAULT_OBJECTIVE='Continue advancing the current Onyx & Ink priorities. Start t
 def report_context(root):
     """Keep enough prior work for continuity without flooding every model call."""
     sections=[]
-    for path in sorted((Path(root)/'reports').glob('*.md')):
+    for path in sorted((Path(root)/'reports').glob('**/*.md'), key=lambda item:item.stat().st_mtime, reverse=True)[:20]:
         try:text=path.read_text().strip()
         except OSError:continue
         if text:
@@ -50,9 +51,11 @@ class StaffAutonomy:
         self.root=Path(root);self.path=self.root/'work'/'staff-autonomy.json';self.process=None
 
     def load(self):
-        base={'enabled':False,'start':'','stop':'','interval':60,'objective':DEFAULT_OBJECTIVE,'lastStarted':'','lastFinished':'','lastExit':None,'lastFinishedEpoch':0,'runNowPending':False,'cycleNumber':0}
+        base={'enabled':False,'start':'','stop':'','objective':DEFAULT_OBJECTIVE,'lastStarted':'','lastFinished':'','lastExit':None,'runNowPending':False,'capacityReadyEpoch':0}
         try:base.update(json.loads(self.path.read_text()))
         except (OSError,ValueError,TypeError):pass
+        for obsolete in ('interval','cycleNumber','lastFinishedEpoch'):
+            base.pop(obsolete,None)
         return base
 
     def save(self,state):
@@ -61,39 +64,40 @@ class StaffAutonomy:
     def configure(self,data):
         state=self.load();start=str(data.get('start','')).strip();stop=str(data.get('stop','')).strip()
         if bool(start)!=bool(stop) or (start and (not valid_time(start) or not valid_time(stop) or start==stop)):raise ValueError('Choose both a start and stop time, or leave both blank.')
-        try:interval=int(data.get('interval',60))
-        except (TypeError,ValueError):raise ValueError('Cycle interval must be a whole number.') from None
         objective=str(data.get('objective','')).strip()
-        if interval not in (0,15,30,60,120,240,480) or not 10<=len(objective)<=2000:raise ValueError('Choose a valid interval and enter an objective.')
-        state.update({'enabled':data.get('enabled') is True,'start':start,'stop':stop,'interval':interval,'objective':objective})
-        if data.get('runNow') is True:state['lastFinishedEpoch']=0;state['enabled']=True;state['runNowPending']=True
+        if not 10<=len(objective)<=2000:raise ValueError('Enter an objective between 10 and 2,000 characters.')
+        state.update({'enabled':data.get('enabled') is True,'start':start,'stop':stop,'objective':objective})
+        state.pop('interval',None);state.pop('lastFinishedEpoch',None)
+        if data.get('runNow') is True:state['enabled']=True;state['runNowPending']=True
         self.save(state);return state
 
     def status(self):
         state=self.load();running=run_active(self.root)
-        state.update({'running':running,'inWindow':in_window(state['start'],state['stop'])})
+        state.update({'running':running,'inWindow':in_window(state['start'],state['stop']),'capacityWaitSeconds':max(0,round(float(state.get('capacityReadyEpoch') or 0)-time.time()))})
         return state
 
     def tick(self):
         state=self.load()
         if self.process and self.process.poll() is not None:
-            state.update({'lastFinished':datetime.now().astimezone().isoformat(timespec='seconds'),'lastFinishedEpoch':time.time(),'lastExit':self.process.returncode});self.process=None;self.save(state)
+            pause=61 if self.process.returncode==0 else 300
+            state.update({'lastFinished':datetime.now().astimezone().isoformat(timespec='seconds'),'lastExit':self.process.returncode,'capacityReadyEpoch':time.time()+pause});self.process=None;self.save(state)
         forced=state.get('runNowPending') is True
         if not state['enabled'] or (not forced and not in_window(state['start'],state['stop'])) or run_active(self.root):return
-        if time.time()-float(state.get('lastFinishedEpoch') or 0)<int(state['interval'])*60:return
+        if not forced and time.time()<float(state.get('capacityReadyEpoch') or 0):return
         log=self.root/'work'/'autonomous-staff.log';log.parent.mkdir(exist_ok=True)
         previous=report_context(self.root)
-        directive=(state['objective']+'\n\nStart this work cycle now. This is an execution cycle, not a request to restate the plan. '
-                   'Each department must choose one concrete unfinished action it can complete with its available tools, do that work, and record the result and next owner. '
+        directive=(state['objective']+'\n\nContinue working during the authorized operating hours. This is an active assignment, not a request to restate the plan. '
+                   'Each agent must independently choose one concrete unfinished action in their permanent department, do that work, and record the result and next owner. '
                    'Do not wait for another agent or for an email unless a truly blocking decision is required.')
         if previous:
             directive+='\n\nUse this compact saved context for continuity. Do not repeat completed work or treat proposed figures as approved facts:\n\n'+previous
         directive=directive[:4000]
         env=dict(os.environ)
-        state['cycleNumber']=int(state.get('cycleNumber') or 0)+1
-        cycle_id=f"cycle-{state['cycleNumber']}"
+        import uuid
+        assignment_id=datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+uuid.uuid4().hex[:6]
         with log.open('ab') as output:
-            self.process=subprocess.Popen([sys.executable,'-u',str(self.root/'main.py'),'--cycle-id',cycle_id,'--directive',directive],cwd=self.root,stdout=output,stderr=output,env=env)
+            project_id, _, _ = active_project(self.root)
+            self.process=subprocess.Popen([sys.executable,'-u',str(self.root/'main.py'),'--assignment-id',assignment_id,'--project',project_id,'--directive',directive],cwd=self.root,stdout=output,stderr=output,env=env)
         state.update({'lastStarted':datetime.now().astimezone().isoformat(timespec='seconds'),'lastExit':None,'runNowPending':False});self.save(state)
 
     def stop(self):

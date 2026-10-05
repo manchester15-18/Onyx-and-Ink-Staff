@@ -392,12 +392,12 @@ class StaffMail:
             Use one JSON object with recipients (a list of names), subject, and body.
             Only internal configured recipients are supported. Draft mode saves without sending.
             Write as a friendly coworker with a natural subject and greeting. Do not use workflow jargon
-            such as task handoff, artifact, or execution cycle. Do not add a sign-off; one is appended.
+            such as task handoff or artifact. Do not add a sign-off; one is appended.
             """
             if self.tool_count >= 4:
                 return "Agent email-tool limit reached; report delivery slots are reserved."
             if 'Owner' in recipients and not allow_owner:
-                return 'Coordinate this question with Morgan. Morgan consolidates CEO questions at the cycle review.'
+                return 'Coordinate this question with Morgan. Morgan will decide whether CEO input is required.'
             self.tool_count += 1
             try:
                 return self.deliver(sender, recipients, subject, body, important='Owner' in recipients)

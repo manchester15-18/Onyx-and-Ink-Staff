@@ -24,6 +24,7 @@ from report_format import normalize_report
 from delivery_tracking import check_delivery
 from inbox_state import InboxState
 from staff_autonomy import StaffAutonomy
+from report_projects import ensure_project, projects
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -160,21 +161,25 @@ def snapshot():
                 processed=[{'uid':r[0],'status':r[1]} for r in connection.execute('SELECT uid,state FROM processed ORDER BY rowid DESC LIMIT 10')]
         except sqlite3.Error: pass
     reports=[]
-    for path in sorted((ROOT/'reports').glob('*.md')):
-        owner={'cycle_brief':'Morgan','marketing_campaign':'Avery','web_dev_specs':'Jordan','legal_terms':'Cameron','operational_plan':'Morgan'}.get(path.stem,'Unassigned')
-        reports.append({'name':path.stem.replace('_',' ').title(),'agent':owner,'body':clean(normalize_report(path.read_text()[:50000]))})
+    project_list=projects(ROOT)
+    for path in sorted((ROOT/'reports').glob('**/*.md'),key=lambda item:item.stat().st_mtime,reverse=True)[:200]:
+        relative=path.relative_to(ROOT/'reports');project=relative.parts[0]
+        owner={'morgan-assignments-legacy':'Morgan','marketing_campaign':'Avery','web_dev_specs':'Jordan','legal_terms':'Cameron','operational_plan':'Morgan','morgan-operations':'Morgan','avery-marketing':'Avery','jordan-web-it':'Jordan','cameron-hr-legal':'Cameron'}.get(path.stem,'Unassigned')
+        if 'agent-drafts' in relative.parts:
+            try:owner=relative.parts[relative.parts.index('agent-drafts')+1].title()
+            except IndexError:pass
+        assignment=path.parent.name if path.parent.parent.name=='assignments' else ''
+        name=(assignment+' · ' if assignment else '')+path.stem.replace('_',' ').replace('-',' ').title()
+        reports.append({'name':name,'agent':owner,'project':project,'body':clean(normalize_report(path.read_text()[:50000]))})
     tools=Actions(ROOT,'Morgan','dashboard-status')
     artifacts=tools.files()
-    for item in artifacts:
-        if item['kind']=='report':
-            reports.append({'name':item['name'],'agent':item['agent'],'body':clean(normalize_report(tools.file(item['file_id']).read_text()[:50000]))})
     addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
-    try:cycle=json.loads((ROOT/'work'/'staff-cycle-status.json').read_text())
-    except (OSError,ValueError,TypeError):cycle={}
-    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),'cycle':cycle,
+    try:work_status=json.loads((ROOT/'work'/'staff-work-status.json').read_text())
+    except (OSError,ValueError,TypeError):work_status={}
+    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),'workStatus':work_status,
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),'importantCc':config.get('IMPORTANT_CC_EMAIL',''),
         'signatures':signature_settings(ROOT,addresses,website),
-        'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
+        'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
 
 def outbox_file(identifier):
@@ -315,6 +320,11 @@ class Handler(BaseHTTPRequestHandler):
                     if monitor_active():
                         stop_monitor();start_monitor();set_desired(True)
                     return self.reply(200,{'message':'Agent signatures restored.' if data.get('reset') is True else 'Agent signatures saved.','signatures':values})
+                elif self.path=='/api/report-project':
+                    name=str(data.get('name','')).strip()
+                    known={item['id']:item['name'] for item in projects(ROOT)}
+                    slug,label,_=ensure_project(ROOT,name,known.get(name,name),activate=True)
+                    return self.reply(200,{'message':label+' selected. New agent reports will save to this project.','project':slug})
                 elif self.path=='/api/smtp-check':
                     import smtplib
                     config=dotenv_values(ROOT/'.env');mail=mail_from_config(config,mode='send')

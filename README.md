@@ -64,7 +64,7 @@ Set these based on your account's actual limits. The output cap includes reasoni
 ./venv/bin/python -m unittest discover -s tests -v
 ```
 
-Tests use mocked HTTP responses, including a complete four-report crew run. They do not spend API credits. Live model behavior and credentials require your first real run.
+Tests use mocked HTTP responses, including four concurrent agent assignments and their reports. They do not spend API credits. Live model behavior and credentials require your first real run.
 
 The previous Gemini `main.py` and `requirements.txt` are backed up in `work/backups/gemini/`. Previously installed Gemini packages may remain in the virtual environment; the Groq code does not import them.
 
@@ -76,7 +76,7 @@ Copy the staff-mail settings from `.env.example` into your existing `.env` witho
 
 With email enabled, Avery sends a natural-language completion update to Jordan and Morgan, Jordan to Cameron and Morgan, and Cameron to Morgan. Routine completion reports stay in the dashboard instead of filling the CEO inbox. Agents email Owner only for an urgent risk, a blocking decision, a failure, or one specific answer needed to finish an assignment. Set `IMPORTANT_CC_EMAIL` to copy a second human on those important Owner messages; normal staff updates and reports do not copy that address. The existing Owner BCC is limited to important Owner mail and outside communication. Set `STAFF_EMAIL_TEAM_UPDATES=false` to disable automatic staff updates. Internal messages send automatically when `STAFF_INTERNAL_EMAIL_MODE=send`; arbitrary outside addresses remain approval drafts.
 
-The normal crew run creates reports and internal staff updates. The separate `inbox_monitor.py` program monitors the shared inbox and handles replies while running. Named agents can act on ordinary requests from one another within existing permissions; coworker email never grants CEO authority. The dashboard can supervise both the inbox monitor and scheduled autonomous staff cycles. CrewAI task context still supplies reports to Morgan directly.
+Autonomous staff create separate assignment reports inside the active project and send internal staff updates. The separate `inbox_monitor.py` program monitors the shared inbox and handles replies while running. Named agents can act on ordinary requests from one another within existing permissions; coworker email never grants CEO authority. The dashboard supervises both the inbox monitor and scheduled autonomous staff work.
 
 The SMTP transport supports an authenticated mail service using either STARTTLS on port 587 or implicit TLS on port 465. In `send` mode set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURITY`, and a shared `SMTP_USER`/`SMTP_PASSWORD` for an account authorized to send from all four aliases. Alternatively set each agent's `<NAME>_SMTP_USER` and `<NAME>_SMTP_PASSWORD`. Never paste credentials into chat. Gmail/Workspace may support app passwords depending on account policy. Microsoft 365 setups generally need OAuth or another approved transport; this code does not implement OAuth yet. Choose your provider before configuring sending.
 
@@ -106,7 +106,7 @@ Where your Google account policy permits app passwords:
 2. Open https://myaccount.google.com/apppasswords and create an app password for Onyx and Ink Staff.
 3. Paste it **locally** into `.env`, without spaces. Use `SMTP_PASSWORD` for the shared alias account, or the relevant `<NAME>_SMTP_PASSWORD` for separate accounts. Do not use the account’s regular password.
 4. Set the corresponding SMTP username locally, and the Owner recipient once confirmed.
-5. Use `STAFF_EMAIL_MODE=draft`, then run `./venv/bin/python main.py --check`. A normal crew run will produce local email drafts alongside the reports.
+5. Use `STAFF_EMAIL_MODE=draft`, then run `./venv/bin/python main.py --check`. Autonomous assignments will produce local email drafts alongside their project reports.
 6. When account permissions and credentials are ready, set `STAFF_EMAIL_MODE=send`. Subsequent normal runs autonomously send the authorized reports and internal messages. `--check` still sends nothing and does not verify authentication.
 
 If app passwords are unavailable under your Workspace policy, leave sending off and use an OAuth integration or admin-approved relay instead. This version does not implement Google OAuth. Google’s app-password instructions: https://support.google.com/accounts/answer/185833.
@@ -195,9 +195,9 @@ The service survives closing Terminal and the browser. It runs while your user i
 
 ### Autonomous staff schedule
 
-Settings → **Autonomous staff** keeps recurring staff cycles enabled until you turn the toggle off or press **Stop now**. Set an objective, choose Continuous or a timed cadence, and optionally set daily operating hours. Continuous starts another cycle as soon as Morgan completes the current review. Each cycle begins with Morgan assigning concrete outcomes; Avery, Jordan, and Cameron then work concurrently before Morgan performs the closing review. A scheduled stop prevents new cycles after the cutoff while allowing the active cycle to finish. The dashboard uses a project lock so a manual and scheduled crew run cannot overlap. Saved state, logs, cycle status, and report contents remain under `work/` or `reports/` and are excluded from GitHub.
+Settings → **Autonomous staff** keeps Morgan, Avery, Jordan, and Cameron working independently until you turn the toggle off or press **Stop now**. Set an objective and optional daily operating hours. Each agent chooses and completes the next useful assignment in their permanent department, then writes a separate report inside the project selected on the Reports page. A scheduled stop prevents new assignments after the cutoff while allowing active work to finish. The dashboard uses a project lock so manual and scheduled staff runs cannot overlap. Saved state, logs, work status, and report contents remain under `work/` or `reports/` and are excluded from GitHub.
 
-Autonomous cycles use Groq and Tavily allowances. Groq pacing can pause model calls even in Continuous mode, and exhausted daily allowances stop a cycle cleanly. Agents must omit unsupported numbers or label them **Proposed target — CEO approval required**. Turning autonomous work on does not authorize outside email, purchases, deployments, or destructive actions; the existing approval rules still apply.
+Autonomous assignments use Groq and Tavily allowances. All four agents share one request and token budget, so Groq pacing pauses individual requests when capacity requires it. Exhausted daily allowances stop the current assignments cleanly. Agents must omit unsupported numbers or label them **Proposed target — CEO approval required**. Turning autonomous work on does not authorize outside email, purchases, deployments, or destructive actions; the existing approval rules still apply.
 
 Use Refresh inbox to load the latest 25 emails from Gmail. Open a message to read its text and attachment names. HTML is converted to text; remote images and scripts are never rendered. Opening here does not mark Gmail messages read. Open attachments in Gmail. Reply as CEO or a named agent; recipients come from the original sender, and personal Gmail is BCC'd. Draft mode saves locally; Live sends after your click and confirmation. Manual replies do not use Groq. Manual send reservations prevent duplicate delivery on retries; unconfirmed outcomes require review, not automatic resend. Existing autonomous monitoring can still reply separately; Stop it before manually handling mail if you want to avoid both responses.
 

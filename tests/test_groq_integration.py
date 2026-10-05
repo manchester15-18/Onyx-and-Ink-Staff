@@ -63,12 +63,21 @@ class GroqTests(unittest.TestCase):
         self.assertIn('HR / Legal (Cameron)',fixed);self.assertIn('Marketing (Avery)',fixed);self.assertIn('Web Development / IT (Jordan)',fixed)
         llm=GroqLLM('offline-test-key')
         try:
-            crew=main.build_crew(llm)
-            self.assertIn('Avery — Marketing',crew.tasks[0].description)
-            self.assertIn('permanent department is Marketing',crew.tasks[1].description)
-            self.assertIn('permanent department is Web Development and IT',crew.tasks[2].description)
-            self.assertIn('permanent department is HR and Legal',crew.tasks[3].description)
+            with tempfile.TemporaryDirectory() as directory:
+                tasks=main.build_assignments(llm,'Continue approved work.',directory)
+                self.assertIn('COO coordination only',tasks['Morgan'].description)
+                self.assertIn('permanent department is Marketing',tasks['Avery'].description)
+                self.assertIn('permanent department is Web Development and IT',tasks['Jordan'].description)
+                self.assertIn('permanent department is HR and Legal',tasks['Cameron'].description)
         finally:llm.close()
+
+    def test_unfinished_model_drafting_is_not_published_as_a_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'morgan-operations.md';path.write_text('Thought: I should decide what to do next.')
+            self.assertFalse(main.finalize_assignment_report(path,'Morgan'))
+            saved=path.read_text()
+            self.assertNotIn('I should decide',saved)
+            self.assertIn('Assignment Needs Retry',saved)
 
     def test_request_and_token_pacing(self):
         budget = RequestBudget(2, 500)
@@ -105,21 +114,19 @@ class GroqTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory, patch.object(socket.socket,'connect',side_effect=AssertionError('Network forbidden')),contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 addresses={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
                 mail=StaffMail(directory,'draft',addresses)
-                crew=main.build_crew(llm, mail=mail)
-                self.assertTrue(all(any('Email from' in tool.name for tool in agent.tools) for agent in crew.agents))
-                self.assertTrue(any(tool.name=='Check sample blank inventory' for tool in crew.agents[0].tools))
-                result = crew.kickoff(inputs={'directive':'Test gift launch','report_dir':directory})
+                tasks=main.build_assignments(llm,'Test gift launch',directory,mail=mail)
+                self.assertTrue(all(any('Email from' in tool.name for tool in task.agent.tools) for task in tasks.values()))
+                self.assertTrue(any(tool.name=='Check sample blank inventory' for tool in tasks['Avery'].agent.tools))
+                result = main.run_assignments(tasks)
                 self.assertEqual(mail.count,3)  # Handoffs only until the run finishes.
                 mail.finish()
                 self.assertEqual(mail.count,3)  # Routine reports stay in the dashboard.
                 self.assertEqual(len(list(mail.outbox.glob('*.eml'))),3)
-                self.assertEqual(len(calls),5)
-                for name in ['cycle_brief.md','marketing_campaign.md','web_dev_specs.md','legal_terms.md','operational_plan.md']:
+                self.assertEqual(len(calls),4)
+                for name in ['morgan-operations.md','avery-marketing.md','jordan-web-it.md','cameron-hr-legal.md']:
                     self.assertTrue((Path(directory)/name).is_file(), name)
-                self.assertIn('Department report 5',str(result))
-                self.assertTrue(all('Test gift launch' in task.description for task in crew.tasks))
-                self.assertEqual(len(crew.tasks[-1].context),4)
-                self.assertTrue(all(task.async_execution for task in crew.tasks[1:4]))
+                self.assertEqual(set(result),{'Morgan','Avery','Jordan','Cameron'})
+                self.assertTrue(all('Test gift launch' in task.description for task in tasks.values()))
         finally: llm.close()
 
     def test_http_retry_is_bounded_and_paced(self):

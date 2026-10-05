@@ -47,6 +47,7 @@ class ActionTests(unittest.TestCase):
    chat=AgentChat(root);chat.llm=Mock();chat.llm.call.side_effect=[json.dumps({'action':'report','arguments':{'title':'Test report','text':'Known facts only.'}}),json.dumps({'answer':'Report created.'})]
    rid=str(uuid.uuid4());answer=chat.ask('Morgan','Create a test report',rid)
    self.assertIn('/api/artifact?id=',answer);self.assertEqual(len(Actions(root,'Morgan','check').files()),1)
+   self.assertEqual(len(list((root/'reports/custom-gift-push/agent-drafts/morgan').glob('*.md'))),1)
    chat.ask('Morgan','Retry',rid);self.assertEqual(chat.llm.call.call_count,2)
  def test_sheet_values_and_calendar_are_validated_before_write(self):
   with tempfile.TemporaryDirectory() as d:
@@ -89,7 +90,7 @@ class ActionTests(unittest.TestCase):
    post.assert_not_called()
  def test_agents_can_read_saved_dashboard_reports(self):
   with tempfile.TemporaryDirectory() as d:
-   root=Path(d);(root/'reports').mkdir();(root/'reports/marketing_campaign.md').write_text('# Marketing\nUse the approved holiday collection.')
+   root=Path(d);folder=root/'reports/custom-gift-push/assignments/one';folder.mkdir(parents=True);(folder/'marketing_campaign.md').write_text('# Marketing\nUse the approved holiday collection.')
    a=Actions(root,'Jordan','reports')
    result=a.execute('staff_reports',{'name':'marketing'})
    self.assertEqual(result['dashboard'],'/reports');self.assertIn('approved holiday collection',result['reports']['marketing'])
