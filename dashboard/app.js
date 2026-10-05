@@ -66,7 +66,7 @@ function render(){
   $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
   $('saveMode').disabled=false;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
-  const au=S.autonomy||{};$('autonomyStatus').textContent=au.running?'Working now':au.enabled?(au.inWindow?'Enabled · waiting for the next cycle':'Enabled · outside scheduled hours'):'Stopped';
+  const au=S.autonomy||{},cy=S.cycle||{};$('autonomyStatus').textContent=au.running?((cy.cycle||'Current cycle')+' · '+(cy.phase||'Working')):au.enabled?(au.inWindow?'Enabled · waiting for the next cycle':'Enabled · outside scheduled hours'):'Stopped';
   if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoInterval').value=String(au.interval||60);$('autoObjective').value=au.objective||'';autonomyReady=true}
   $('stopAutonomy').disabled=!au.enabled&&!au.running;
   const items=attention();$('attnCount').textContent=items.length;

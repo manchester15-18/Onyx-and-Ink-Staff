@@ -1,7 +1,11 @@
 """Run the Onyx and Ink staff on Groq. Configuration lives in .env."""
 import argparse
 import fcntl
+import json
 import os
+import threading
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 # Keep CrewAI runtime data inside this project, before importing CrewAI.
@@ -50,8 +54,9 @@ def check_blank_stock(item_names: list[str]) -> str:
     aliases = {"tumblers": "tumbler", "keychains": "keychain", "shirts": "shirt", "t-shirt": "shirt", "t_shirts": "shirt", "puzzles": "puzzle", "bookmarks": "bookmark"}
     lines = ["SAMPLE INVENTORY — confirm actual counts before making commitments."]
     for name in item_names:
-        normalized = name.strip().lower()
+        normalized = name.strip().lower().replace('_',' ').replace('-',' ')
         normalized = aliases.get(normalized, normalized)
+        normalized = next((item for item in SAMPLE_INVENTORY if item in normalized),normalized)
         if normalized == "all":
             lines.extend(f"{item}: {stock}" for item, stock in SAMPLE_INVENTORY.items())
         else:
@@ -94,7 +99,24 @@ def verified_search_key(search_key):
     return search_key
 
 
-def build_crew(llm, search_key=None, verbose=False, mail=None):
+class CycleProgress:
+    """Private progress receipt used by the dashboard; it contains no credentials."""
+    def __init__(self,root,cycle_id):
+        self.path=Path(root)/'work'/'staff-cycle-status.json';self.cycle_id=cycle_id;self.completed=[];self.lock=threading.Lock()
+    def write(self,phase,status='running',detail=''):
+        with self.lock:
+            data={'cycle':self.cycle_id,'phase':phase,'status':status,'detail':detail,'completed':list(self.completed),'updated':datetime.now().astimezone().isoformat(timespec='seconds')}
+            self.path.parent.mkdir(exist_ok=True);temp=self.path.with_suffix('.tmp');temp.write_text(json.dumps(data,indent=2));temp.chmod(0o600);temp.replace(self.path)
+    def callback(self,name,after=None,next_phase=''):
+        def done(output):
+            if after:after(output)
+            with self.lock:
+                if name not in self.completed:self.completed.append(name)
+            self.write(next_phase or name+' completed',detail=name+' finished its assigned work.')
+        return done
+
+
+def build_crew(llm, search_key=None, verbose=False, mail=None, progress=None):
     search_tools = [search_web] if search_key else []
     rules = (
         "Use one JSON object matching the schema per tool call; never a top-level array. "
@@ -112,7 +134,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
     if mail and mail.mode != "off":
         for name, agent in (("Avery", marketing), ("Jordan", web), ("Cameron", legal), ("Morgan", coo)):
-            agent.tools.append(mail.tool_for(name))
+            agent.tools.append(mail.tool_for(name,allow_owner=name=='Morgan'))
             agent.backstory += (
                 f" Your email address is {mail.addresses[name]}. You may email Owner or named coworkers "
                 "when a specific question, assignment, or decision needs their attention. "
@@ -131,26 +153,36 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
             # Template interpolation preserves absolute paths in CrewAI 1.6.1.
             output_file="{report_dir}/" + filename,
         )
-    marketing_task = task(marketing, "Begin immediately by completing the highest-priority unfinished marketing action supported by the directive. Check sample blank inventory when relevant, then produce or advance concrete products, audiences, offers, channels, or campaign copy. State what you completed and the next owner. " + research, "marketing_campaign.md")
-    web_task = task(web, "Begin immediately by completing the highest-priority unfinished storefront action supported by the directive. Produce or advance concrete implementation requirements for personalization, uploads, accessibility, or mobile checkout. State what you completed and the next owner.", "web_dev_specs.md")
-    legal_task = task(legal, "Begin immediately by completing the highest-priority unfinished policy or HR action supported by the directive. Produce or advance usable custom-order, returns, defects, IP, or dispute language and flag only genuinely blocking jurisdiction questions. State what you completed and the next owner. " + research, "legal_terms.md")
-    summary = task(coo, "Review the three completed department updates. Decide the next executable priorities, assign clear owners, resolve overlaps, and identify only decisions that actually block further work. Preserve uncertainties and sample-data labels.", "operational_plan.md", [marketing_task, web_task, legal_task])
+    brief = task(coo, "Start the cycle by reviewing the saved context. Define one concrete, finishable outcome for Avery, Jordan, and Cameron that advances the objective without repeating completed work. Keep nonblocking work moving even when a CEO decision is pending. Consolidate all genuine CEO questions into at most one section, but do not email the CEO during kickoff. Assign only work possible with the agents' stated tools; distinguish implementation from recommendations.", "cycle_brief.md")
+    marketing_task = task(marketing, "Use Morgan's cycle brief as your assignment. Complete the marketing outcome now rather than drafting another broad plan. Check sample blank inventory when relevant, then produce usable campaign copy, product decisions, research, or channel material. State evidence, exactly what changed, and the next owner. " + research, "marketing_campaign.md", [brief])
+    web_task = task(web, "Use Morgan's cycle brief as your assignment. Complete the storefront outcome now rather than repeating general requirements. Produce a usable specification, acceptance criteria, content structure, or implementation-ready decision within your available tools. Never claim code was deployed. State evidence, exactly what changed, and the next owner.", "web_dev_specs.md", [brief])
+    legal_task = task(legal, "Use Morgan's cycle brief as your assignment. Complete the policy or HR outcome now rather than repeating general advice. Produce usable draft language or a focused, sourced review and flag only a decision that truly blocks further work. State evidence, exactly what changed, and the next owner. " + research, "legal_terms.md", [brief])
+    marketing_task.async_execution=True
+    web_task.async_execution=True
+    legal_task.async_execution=True
+    summary = task(coo, "Review the kickoff brief and the three completed department updates. Record completed work separately from recommendations, resolve overlaps, assign the next executable owners, and carry forward unfinished items. Email the CEO only if one consolidated response is genuinely required before useful work can continue.", "operational_plan.md", [brief,marketing_task, web_task, legal_task])
     if mail and mail.mode != "off":
-        for name, staff_task in (("Avery", marketing_task), ("Jordan", web_task), ("Cameron", legal_task), ("Morgan", summary)):
-            staff_task.callback = mail.report_callback(name)
-    return Crew(tracing=False, agents=[marketing, web, legal, coo], tasks=[marketing_task, web_task, legal_task, summary], process=Process.sequential, verbose=verbose)
+        for name, staff_task in (("Avery", marketing_task), ("Jordan", web_task), ("Cameron", legal_task)):
+            callback=mail.report_callback(name)
+            staff_task.callback=progress.callback(name,callback,'Departments working in parallel') if progress else callback
+    if progress:
+        brief.callback=progress.callback('Morgan kickoff',next_phase='Departments working in parallel')
+        summary.callback=progress.callback('Morgan review',next_phase='Cycle complete')
+    return Crew(tracing=False, agents=[marketing, web, legal, coo], tasks=[brief,marketing_task, web_task, legal_task, summary], process=Process.sequential, verbose=verbose)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run Onyx and Ink staff using Groq.")
     parser.add_argument("--check", action="store_true", help="Validate configuration without external API calls.")
     parser.add_argument("--directive", default=DEFAULT_DIRECTIVE)
+    parser.add_argument("--cycle-id",default='')
     parser.add_argument("--verbose", action="store_true", help="Show detailed agent activity.")
     args = parser.parse_args(argv)
     load_dotenv(PROJECT_DIR / ".env")
     llm = None
     mail = None
     run_lock = None
+    progress = None
     try:
         if not args.check:
             lock_path=PROJECT_DIR/'work'/'staff-run.lock';lock_path.parent.mkdir(exist_ok=True);run_lock=lock_path.open('a')
@@ -168,37 +200,45 @@ def main(argv=None):
         )
         if not args.check:
             search_key = verified_search_key(search_key)
-        crew = build_crew(llm, search_key, args.verbose, mail)
+        cycle_id=args.cycle_id or datetime.now().strftime('%Y%m%d-%H%M')+'-'+uuid.uuid4().hex[:6]
+        progress=CycleProgress(PROJECT_DIR,cycle_id)
+        crew = build_crew(llm, search_key, args.verbose, mail,progress=None if args.check else progress)
         inputs = {"directive": args.directive, "report_dir": str(PROJECT_DIR / "reports")}
         if args.check:
             crew._interpolate_inputs(inputs)
-            print(f"Setup OK: Groq model {llm.model}, four agents, four tasks. Web search: {'configured (not verified)' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
+            print(f"Setup OK: Groq model {llm.model}, four agents, five phased tasks. Web search: {'configured (not verified)' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
             return 0
+        progress.write('Morgan prioritizing',detail='Morgan is reviewing prior work and assigning this cycle.')
         print(f"Running Onyx and Ink staff on Groq ({llm.model}). Free-tier pacing may pause between requests.")
         result = crew.kickoff(inputs=inputs)
         for report_path in (PROJECT_DIR/'reports').glob('*.md'):
             report_path.write_text(normalize_report(report_path.read_text())+'\n')
         mail.finish()
+        progress.write('Cycle complete',status='complete',detail='Morgan completed the cycle review.')
         print(result)
         print(f"Reports saved to {PROJECT_DIR / 'reports'}")
         return 0
     except APIStatusError as error:
+        if progress:progress.write('Cycle stopped',status='failed',detail='Groq stopped the cycle before completion.')
         messages = {401: "Groq rejected the API key. Check GROQ_API_KEY.", 403: "Groq denied model access. Check model permissions in your Groq account.", 404: "Groq model not found. Check GROQ_MODEL.", 429: "Groq quota is exhausted after bounded retries. Check your account's request, token, and daily limits.", 400: "Groq rejected a request. Check model compatibility and the prompt size."}
         print(messages.get(error.status_code, f"Groq returned HTTP {error.status_code} after retries. Try later."))
         if mail and not args.check:
             mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")
         return 1
     except (APIConnectionError, ConnectionError):
+        if progress:progress.write('Cycle stopped',status='failed',detail='The AI service could not be reached.')
         print("Could not reach Groq after retries. Check your connection and try later.")
         if mail and not args.check:
             mail.failure("The staff run stopped. Check the local run output for the configuration or service issue.")
         return 1
     except ValueError as error:
+        if progress:progress.write('Cycle stopped',status='failed',detail='Configuration needs attention.')
         print(f"Configuration/request error: {error}")
         if mail and not args.check:
             mail.failure("The staff run stopped due to a configuration or request issue. Check local output.")
         return 1
     except Exception:
+        if progress:progress.write('Cycle stopped',status='failed',detail='The cycle stopped unexpectedly.')
         if mail and not args.check:
             mail.failure("The staff run stopped unexpectedly. Check the local run output.")
         raise

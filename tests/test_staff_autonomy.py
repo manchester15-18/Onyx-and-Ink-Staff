@@ -19,6 +19,8 @@ class StaffAutonomyTests(unittest.TestCase):
             state=manager.configure({'enabled':True,'start':'08:00','stop':'18:00','interval':120,'objective':'Continue the approved holiday launch work.'})
             self.assertTrue(state['enabled']);self.assertEqual(manager.path.stat().st_mode & 0o777,0o600)
             with self.assertRaises(ValueError):manager.configure({'enabled':True,'start':'08:00','stop':'','interval':5,'objective':'short'})
+            state=manager.configure({'enabled':True,'start':'','stop':'','interval':0,'objective':'Continue approved holiday work without idle time.'})
+            self.assertEqual(state['interval'],0)
 
     def test_run_now_uses_saved_reports_without_overlapping(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -29,6 +31,7 @@ class StaffAutonomyTests(unittest.TestCase):
                 manager.tick()
             directive=launch.call_args.args[0][-1]
             self.assertIn('Existing plan',directive);self.assertIn('Do not repeat completed work',directive)
+            self.assertIn('--cycle-id',launch.call_args.args[0]);self.assertEqual(manager.load()['cycleNumber'],1)
 
 
 if __name__=='__main__':unittest.main()

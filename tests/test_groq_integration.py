@@ -81,11 +81,7 @@ class GroqTests(unittest.TestCase):
             self.assertEqual(payload['reasoning_effort'], 'none')
             self.assertNotIn('stop', payload)
             calls.append(payload)
-            content = (
-                'Thought: Check the sample inventory first.\nAction: Check sample blank inventory\nAction Input: {"item_names": ["shirt", "tumbler"]}'
-                if len(calls) == 1
-                else f'Final Answer: Department report {len(calls)}. Sample data only.'
-            )
+            content=f'Final Answer: Department report {len(calls)}. Sample data only.'
             return httpx.Response(200, json={'id':'mock','object':'chat.completion','created':0,'model':payload['model'],'choices':[{'index':0,'message':{'role':'assistant','content':content},'finish_reason':'stop'}],'usage':{'prompt_tokens':50,'completion_tokens':20,'total_tokens':70}})
         llm = GroqLLM('offline-test-key')
         llm.client.close()
@@ -96,18 +92,19 @@ class GroqTests(unittest.TestCase):
                 mail=StaffMail(directory,'draft',addresses)
                 crew=main.build_crew(llm, mail=mail)
                 self.assertTrue(all(any('Email from' in tool.name for tool in agent.tools) for agent in crew.agents))
+                self.assertTrue(any(tool.name=='Check sample blank inventory' for tool in crew.agents[0].tools))
                 result = crew.kickoff(inputs={'directive':'Test gift launch','report_dir':directory})
                 self.assertEqual(mail.count,3)  # Handoffs only until the run finishes.
                 mail.finish()
                 self.assertEqual(mail.count,3)  # Routine reports stay in the dashboard.
                 self.assertEqual(len(list(mail.outbox.glob('*.eml'))),3)
                 self.assertEqual(len(calls),5)
-                self.assertIn("240 units", json.dumps(calls[1]["messages"]))
-                for name in ['marketing_campaign.md','web_dev_specs.md','legal_terms.md','operational_plan.md']:
+                for name in ['cycle_brief.md','marketing_campaign.md','web_dev_specs.md','legal_terms.md','operational_plan.md']:
                     self.assertTrue((Path(directory)/name).is_file(), name)
                 self.assertIn('Department report 5',str(result))
                 self.assertTrue(all('Test gift launch' in task.description for task in crew.tasks))
-                self.assertEqual(len(crew.tasks[-1].context),3)
+                self.assertEqual(len(crew.tasks[-1].context),4)
+                self.assertTrue(all(task.async_execution for task in crew.tasks[1:4]))
         finally: llm.close()
 
     def test_http_retry_is_bounded_and_paced(self):

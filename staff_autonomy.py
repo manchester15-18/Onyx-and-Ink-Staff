@@ -50,7 +50,7 @@ class StaffAutonomy:
         self.root=Path(root);self.path=self.root/'work'/'staff-autonomy.json';self.process=None
 
     def load(self):
-        base={'enabled':False,'start':'','stop':'','interval':60,'objective':DEFAULT_OBJECTIVE,'lastStarted':'','lastFinished':'','lastExit':None,'lastFinishedEpoch':0,'runNowPending':False}
+        base={'enabled':False,'start':'','stop':'','interval':60,'objective':DEFAULT_OBJECTIVE,'lastStarted':'','lastFinished':'','lastExit':None,'lastFinishedEpoch':0,'runNowPending':False,'cycleNumber':0}
         try:base.update(json.loads(self.path.read_text()))
         except (OSError,ValueError,TypeError):pass
         return base
@@ -64,7 +64,7 @@ class StaffAutonomy:
         try:interval=int(data.get('interval',60))
         except (TypeError,ValueError):raise ValueError('Cycle interval must be a whole number.') from None
         objective=str(data.get('objective','')).strip()
-        if interval not in (60,120,240,480) or not 10<=len(objective)<=2000:raise ValueError('Choose a valid interval and enter an objective.')
+        if interval not in (0,15,30,60,120,240,480) or not 10<=len(objective)<=2000:raise ValueError('Choose a valid interval and enter an objective.')
         state.update({'enabled':data.get('enabled') is True,'start':start,'stop':stop,'interval':interval,'objective':objective})
         if data.get('runNow') is True:state['lastFinishedEpoch']=0;state['enabled']=True;state['runNowPending']=True
         self.save(state);return state
@@ -90,8 +90,10 @@ class StaffAutonomy:
             directive+='\n\nUse this compact saved context for continuity. Do not repeat completed work or treat proposed figures as approved facts:\n\n'+previous
         directive=directive[:4000]
         env=dict(os.environ)
+        state['cycleNumber']=int(state.get('cycleNumber') or 0)+1
+        cycle_id=f"cycle-{state['cycleNumber']}"
         with log.open('ab') as output:
-            self.process=subprocess.Popen([sys.executable,'-u',str(self.root/'main.py'),'--directive',directive],cwd=self.root,stdout=output,stderr=output,env=env)
+            self.process=subprocess.Popen([sys.executable,'-u',str(self.root/'main.py'),'--cycle-id',cycle_id,'--directive',directive],cwd=self.root,stdout=output,stderr=output,env=env)
         state.update({'lastStarted':datetime.now().astimezone().isoformat(timespec='seconds'),'lastExit':None,'runNowPending':False});self.save(state)
 
     def stop(self):

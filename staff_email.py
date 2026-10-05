@@ -5,6 +5,7 @@ import json
 import re
 import smtplib
 import ssl
+import threading
 import uuid
 import fcntl
 from email import policy
@@ -140,6 +141,7 @@ class StaffMail:
         self.reports = {}
         self.reported = set()
         self.tool_count = 0
+        self.lock = threading.RLock()
         if mode == 'off':
             return
         if bcc and not valid_address(bcc):
@@ -193,6 +195,10 @@ class StaffMail:
                    important_cc=get('IMPORTANT_CC_EMAIL',''))
 
     def deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None, important=False):
+        with self.lock:
+            return self._deliver(sender,recipients,subject,body,kind=kind,in_reply_to=in_reply_to,references=references,reply_address=reply_address,forwarded_message=forwarded_message,attachments=attachments,important=important)
+
+    def _deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None, important=False):
         if self.mode == 'off':
             return 'Staff email is disabled.'
         if sender not in STAFF and not (sender in ('Owner', 'Shared') and kind in ('manual', 'compose')):
@@ -378,7 +384,7 @@ class StaffMail:
         except (ValueError, OSError):
             print('Failure notification could not be prepared.')
 
-    def tool_for(self, sender):
+    def tool_for(self, sender, allow_owner=True):
         from crewai.tools import tool
         @tool(f'Email from {sender}')
         def email_staff(recipients: list[str], subject: str, body: str) -> str:
@@ -390,6 +396,8 @@ class StaffMail:
             """
             if self.tool_count >= 4:
                 return "Agent email-tool limit reached; report delivery slots are reserved."
+            if 'Owner' in recipients and not allow_owner:
+                return 'Coordinate this question with Morgan. Morgan consolidates CEO questions at the cycle review.'
             self.tool_count += 1
             try:
                 return self.deliver(sender, recipients, subject, body, important='Owner' in recipients)
