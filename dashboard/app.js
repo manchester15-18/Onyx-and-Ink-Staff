@@ -30,6 +30,14 @@ function sure(text,ok='Confirm'){return new Promise(res=>{const d=$('confirmDlg'
   $('confirmText').textContent=text;$('confirmOk').textContent=ok;$('confirmOk').onclick=()=>fin(true);$('confirmNo').onclick=()=>fin(false);d.onclose=()=>fin(false);d.showModal();$('confirmNo').focus()})}
 function detail(title,meta,body,actions=[]){$('detailTitle').textContent=title;$('detailMeta').textContent=meta;$('detailBody').textContent=body;
   $('detailActions').replaceChildren(...actions);$('detail').showModal()}
+function reportInline(text){const f=document.createDocumentFragment();let rest=text;
+  const pattern=/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)]+\))/;
+  while(rest){const m=rest.match(pattern);if(!m){f.append(document.createTextNode(rest));break}if(m.index)f.append(document.createTextNode(rest.slice(0,m.index)));
+    const token=m[0];if(token.startsWith('**'))f.append(el('strong','',token.slice(2,-2)));else if(token.startsWith('`'))f.append(el('code','',token.slice(1,-1)));else{const link=token.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);const a=el('a','',link[1]);a.href=link[2];a.target='_blank';a.rel='noopener noreferrer';f.append(a)}rest=rest.slice(m.index+token.length)}return f}
+function renderReport(text){const box=$('reportBody');box.replaceChildren();const lines=String(text||'').split(/\r?\n/);let list=null,type='';
+  const close=()=>{list=null;type=''};for(const raw of lines){const line=raw.trim();if(!line){close();continue}const h=line.match(/^(#{1,4})\s+(.+)$/),section=line.match(/^\*\*([^*]+)\*\*$/),bullet=line.match(/^[-*+]\s+(.+)$/),num=line.match(/^\d+[.)]\s+(.+)$/);
+    if(h){close();const n=el('h'+Math.min(4,h[1].length+1));n.append(reportInline(h[2]));box.append(n)}else if(section){close();box.append(el('h3','',section[1]))}else if(bullet||num){const wanted=bullet?'ul':'ol';if(!list||type!==wanted){list=el(wanted);type=wanted;box.append(list)}const li=el('li');li.append(reportInline((bullet||num)[1]));list.append(li)}else{close();const p=el('p');p.append(reportInline(line));box.append(p)}}
+  if(!box.childNodes.length)box.append(el('p','empty','This report is empty.'))}
 async function refresh(){try{const r=await fetch('/api/status');if(r.status===401){location.reload();return}if(!r.ok)throw 0;
   const text=await r.text();if(text===sig&&S)return;sig=text;S=JSON.parse(text);render()}catch{$('connection').textContent='Dashboard offline'}}
 
@@ -124,7 +132,7 @@ function renderReports(){
   $('reportFilters').replaceChildren(...names.map(n=>{const b=el('button',n===repFilter?'on':'',n==='all'?'All':n);b.onclick=()=>{repFilter=n;renderReports()};return b}));
   const list=S.reports.map((r,i)=>[r,i]).filter(([r])=>repFilter==='all'||r.agent===repFilter);
   $('reportList').replaceChildren(...(list.length?list.map(([r,i])=>{const b=el('button','m'+(i===repIdx?' on':''));b.append(el('b','',r.name),el('small','',r.agent));b.onclick=()=>{repIdx=i;renderReports()};return b}):[el('p','empty','No saved reports for this selection yet.')]));
-  $('reportBody').textContent=repIdx!==null&&S.reports[repIdx]?S.reports[repIdx].body:'Select a report.'}
+  renderReport(repIdx!==null&&S.reports[repIdx]?S.reports[repIdx].body:'Select a report.')}
 
 /* ---------- navigation ---------- */
 function showPage(){let p=location.pathname.split('/')[1]||'overview';if(!PAGES.includes(p))p='overview';

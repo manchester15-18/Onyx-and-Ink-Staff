@@ -17,6 +17,7 @@ from crewai.tools import tool
 from openai import APIConnectionError, APIStatusError
 from groq_llm import GroqLLM
 from staff_email import StaffMail
+from report_format import normalize_report
 from web_research import WebResearchError, search as tavily_search, verify as verify_tavily
 
 DEFAULT_DIRECTIVE = "Plan our upcoming custom gift product push for Onyx and Ink. Provide a coordinated operational plan."
@@ -119,8 +120,8 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     research = "Use web search for current claims." if search_key else "Web search is unavailable; clearly label market ideas as assumptions and list research needed."
     def task(agent, description, filename, context=None):
         return Task(
-            description="CEO directive: {directive}\n\n" + description + " Keep the report under 300 words.",
-            expected_output="A concise Markdown report with actions, assumptions, and open decisions.",
+            description="CEO directive: {directive}\n\n" + description + " Keep the report under 220 words. Return only the finished Markdown report. Never include thoughts, reasoning, tool narration, 'Final Answer', or code fences.",
+            expected_output="A complete, concise Markdown report with actions, assumptions, and open decisions; no reasoning transcript or code fence.",
             agent=agent,
             context=context or [],
             # Template interpolation preserves absolute paths in CrewAI 1.6.1.
@@ -164,6 +165,8 @@ def main(argv=None):
             return 0
         print(f"Running Onyx and Ink staff on Groq ({llm.model}). Free-tier pacing may pause between requests.")
         result = crew.kickoff(inputs=inputs)
+        for report_path in (PROJECT_DIR/'reports').glob('*.md'):
+            report_path.write_text(normalize_report(report_path.read_text())+'\n')
         mail.finish()
         print(result)
         print(f"Reports saved to {PROJECT_DIR / 'reports'}")
