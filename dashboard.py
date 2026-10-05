@@ -24,7 +24,7 @@ from report_format import normalize_report
 from delivery_tracking import check_delivery
 from inbox_state import InboxState
 from staff_autonomy import StaffAutonomy
-from report_projects import ensure_project, projects
+from report_projects import create_report, delete_project, delete_report, ensure_project, projects
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -138,6 +138,18 @@ def clean(text):
     return re.sub(r'(?:gsk_|AIza)[A-Za-z0-9_-]+','[REDACTED]',text)
 
 
+def report_display_name(path,relative):
+    labels={'morgan-operations':'Morgan · Operations','avery-marketing':'Avery · Marketing','jordan-web-it':'Jordan · Web Development / IT','cameron-hr-legal':'Cameron · HR / Legal','marketing_campaign':'Marketing Campaign','web_dev_specs':'Web Development / IT','legal_terms':'HR / Legal','operational_plan':'Operations Plan'}
+    title=labels.get(path.stem,path.stem.rsplit('-',1)[0].replace('_',' ').replace('-',' ').title())
+    if path.parent.parent.name!='assignments':return title
+    assignment=path.parent.name
+    if assignment=='legacy-import':return 'Imported · '+title
+    try:
+        when=datetime.strptime('-'.join(assignment.split('-')[:2]),'%Y%m%d-%H%M%S')
+        return when.strftime('%b %d, %Y · %I:%M %p').replace(' 0',' ')+' · '+title
+    except ValueError:return title
+
+
 def snapshot():
     config=dotenv_values(ROOT/'.env')
     activity=[]
@@ -165,12 +177,11 @@ def snapshot():
     for path in sorted((ROOT/'reports').glob('**/*.md'),key=lambda item:item.stat().st_mtime,reverse=True)[:200]:
         relative=path.relative_to(ROOT/'reports');project=relative.parts[0]
         owner={'morgan-assignments-legacy':'Morgan','marketing_campaign':'Avery','web_dev_specs':'Jordan','legal_terms':'Cameron','operational_plan':'Morgan','morgan-operations':'Morgan','avery-marketing':'Avery','jordan-web-it':'Jordan','cameron-hr-legal':'Cameron'}.get(path.stem,'Unassigned')
-        if 'agent-drafts' in relative.parts:
-            try:owner=relative.parts[relative.parts.index('agent-drafts')+1].title()
+        report_group=next((group for group in ('agent-drafts','manual') if group in relative.parts),None)
+        if report_group:
+            try:owner=relative.parts[relative.parts.index(report_group)+1].title()
             except IndexError:pass
-        assignment=path.parent.name if path.parent.parent.name=='assignments' else ''
-        name=(assignment+' · ' if assignment else '')+path.stem.replace('_',' ').replace('-',' ').title()
-        reports.append({'name':name,'agent':owner,'project':project,'body':clean(normalize_report(path.read_text()[:50000]))})
+        reports.append({'id':str(relative),'name':report_display_name(path,relative),'agent':owner,'project':project,'body':clean(normalize_report(path.read_text()[:50000]))})
     tools=Actions(ROOT,'Morgan','dashboard-status')
     artifacts=tools.files()
     addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
@@ -325,6 +336,21 @@ class Handler(BaseHTTPRequestHandler):
                     known={item['id']:item['name'] for item in projects(ROOT)}
                     slug,label,_=ensure_project(ROOT,name,known.get(name,name),activate=True)
                     return self.reply(200,{'message':label+' selected. New agent reports will save to this project.','project':slug})
+                elif self.path=='/api/create-report':
+                    result=create_report(ROOT,str(data.get('project','')),str(data.get('agent','')),str(data.get('title','')),clean(str(data.get('body',''))))
+                    return self.reply(200,{'message':'Report created in '+result['project_name']+'.','report':result})
+                elif self.path=='/api/delete-report':
+                    if data.get('confirm') is not True:raise ValueError()
+                    identifier=str(data.get('id',''))
+                    try:current=json.loads((ROOT/'work'/'staff-work-status.json').read_text()).get('assignment','')
+                    except (OSError,ValueError,TypeError):current=''
+                    if AUTONOMY.status().get('running') and current and current in identifier:return self.reply(409,{'error':'This assignment is still active. Stop staff or wait for it to finish before deleting its report.'})
+                    delete_report(ROOT,identifier);return self.reply(200,{'message':'Report deleted.'})
+                elif self.path=='/api/delete-project':
+                    if data.get('confirm') is not True:raise ValueError()
+                    project=str(data.get('project',''))
+                    if AUTONOMY.status().get('running') and project==next((item['id'] for item in projects(ROOT) if item['active']),None):return self.reply(409,{'error':'Stop autonomous staff before deleting the active project.'})
+                    active=delete_project(ROOT,project);return self.reply(200,{'message':'Project deleted.','project':active})
                 elif self.path=='/api/smtp-check':
                     import smtplib
                     config=dotenv_values(ROOT/'.env');mail=mail_from_config(config,mode='send')

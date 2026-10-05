@@ -1,6 +1,8 @@
 """Safe local project folders for staff reports."""
 import json
 import re
+import shutil
+import uuid
 from pathlib import Path
 
 DEFAULT_PROJECT = "custom-gift-push"
@@ -73,6 +75,47 @@ def projects(root):
         {"id": slug, "name": state["labels"].get(slug, slug.replace("-", " ").title()), "active": slug == active}
         for slug in sorted(slugs, key=lambda value: (value != active, state["labels"].get(value, value).lower()))
     ]
+
+
+def create_report(root,project,agent,title,body):
+    if agent not in ('Morgan','Avery','Jordan','Cameron'):
+        raise ValueError('Choose Morgan, Avery, Jordan, or Cameron.')
+    title=str(title or '').strip();body=str(body or '').strip()
+    if not title or len(title)>160 or not body or len(body)>50000:
+        raise ValueError('Enter a title and report body within the allowed length.')
+    slug,label,folder=ensure_project(root,project)
+    destination=folder/'manual'/agent.lower();destination.mkdir(parents=True,exist_ok=True)
+    path=destination/(project_slug(title)+'-'+uuid.uuid4().hex[:8]+'.md')
+    path.write_text(body+'\n');path.chmod(0o600)
+    return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label}
+
+
+def delete_report(root,identifier):
+    report_root=(Path(root)/'reports').resolve();path=(report_root/str(identifier)).resolve()
+    if not path.is_relative_to(report_root) or path.suffix!='.md' or not path.is_file():
+        raise ValueError('Choose a saved report.')
+    project_root=(report_root/path.relative_to(report_root).parts[0]).resolve();path.unlink()
+    parent=path.parent
+    while parent!=project_root and parent.is_relative_to(project_root):
+        try:parent.rmdir()
+        except OSError:break
+        parent=parent.parent
+
+
+def delete_project(root,project):
+    state=_load(root);slug=project_slug(project);report_root=(Path(root)/'reports').resolve();folder=(report_root/slug).resolve()
+    if not folder.is_relative_to(report_root) or not folder.is_dir():raise ValueError('Choose a saved project.')
+    shutil.rmtree(folder)
+    state['labels'].pop(slug,None)
+    remaining=sorted(path.name for path in report_root.iterdir() if path.is_dir() and not path.name.startswith('.'))
+    if remaining:
+        state['active']=remaining[0]
+        state['labels'].setdefault(remaining[0],remaining[0].replace('-',' ').title())
+        _save(root,state)
+    else:
+        state={'active':DEFAULT_PROJECT,'labels':{DEFAULT_PROJECT:DEFAULT_LABEL}};_save(root,state)
+        (report_root/DEFAULT_PROJECT).mkdir(parents=True,exist_ok=True)
+    return state['active']
 
 
 def migrate_legacy_reports(root, project=DEFAULT_PROJECT):
