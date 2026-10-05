@@ -3,6 +3,7 @@ import argparse
 import fcntl
 import json
 import os
+import re
 import threading
 import uuid
 from datetime import datetime
@@ -26,6 +27,11 @@ from report_format import normalize_report
 from web_research import WebResearchError, search as tavily_search, verify as verify_tavily
 
 DEFAULT_DIRECTIVE = "Plan our upcoming custom gift product push for Onyx and Ink. Provide a coordinated operational plan."
+DEPARTMENT_RULES = (
+    "Department ownership is immutable: Avery owns Marketing only; Jordan owns Web Development and IT only; "
+    "Cameron owns HR and Legal only; Morgan owns COO coordination only. Morgan may split cross-functional work "
+    "into department-aligned pieces but may never swap, rename, or reassign these departments."
+)
 SAMPLE_INVENTORY = {
     "tumbler": "240 units (20oz Stainless Steel - White)",
     "keychain": "500 units (Acrylic Clear Blanks)",
@@ -99,6 +105,30 @@ def verified_search_key(search_key):
     return search_key
 
 
+def enforce_department_ownership(value):
+    """Correct owner labels if a model pairs a department with the wrong agent."""
+    text = str(value)
+    departments = (
+        (r"Marketing", "Marketing", "Avery"),
+        (r"Web\s*(?:Development|Dev)|IT|Engineering", "Web Development / IT", "Jordan"),
+        (r"HR\s*(?:/|&|and)\s*Legal|Legal\s*(?:/|&|and)\s*HR|Legal|Human Resources", "HR / Legal", "Cameron"),
+    )
+    for pattern, label, owner in departments:
+        text = re.sub(
+            rf"(?:{pattern})\s*\(\s*(?:Avery|Jordan|Cameron)\s*\)",
+            f"{label} ({owner})",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            rf"(?:Avery|Jordan|Cameron)\s*\(\s*(?:{pattern})\s*\)",
+            f"{owner} ({label})",
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
 class CycleProgress:
     """Private progress receipt used by the dashboard; it contains no credentials."""
     def __init__(self,root,cycle_id):
@@ -119,6 +149,7 @@ class CycleProgress:
 def build_crew(llm, search_key=None, verbose=False, mail=None, progress=None):
     search_tools = [search_web] if search_key else []
     rules = (
+        DEPARTMENT_RULES+" "
         "Use one JSON object matching the schema per tool call; never a top-level array. "
         "Keep tool calls and reports concise. Distinguish facts, sample inventory, assumptions, and recommendations. "
         "Never invent numeric targets, budgets, deadlines, capacity, conversion rates, revenue, inventory, or performance results. Use a number only when it comes from the CEO directive, the sample inventory tool, or a cited current source. Otherwise say the value is unknown or label it 'Proposed target — CEO approval required.' "
@@ -128,9 +159,9 @@ def build_crew(llm, search_key=None, verbose=False, mail=None, progress=None):
         "If web search reports unavailable, do not retry it; continue with clearly labeled assumptions."
     )
     common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=6, verbose=verbose)
-    marketing = Agent(role="Avery - Head of Marketing - Onyx and Ink", goal="Plan a focused custom gift campaign.", backstory="Your name is Avery. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks. " + rules, tools=[check_blank_stock, *search_tools], **common)
-    web = Agent(role="Jordan - Head of Web Development - Onyx and Ink", goal="Specify product personalization and checkout improvements.", backstory="Your name is Jordan. You prepare implementation requirements for the storefront. " + rules, **common)
-    legal = Agent(role="Cameron - Head of Legal and HR - Onyx and Ink", goal="Draft customer policies and operational review items.", backstory="Your name is Cameron. You prepare policy drafts. Identify missing jurisdiction and legal review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, **common)
+    marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools], **common)
+    web = Agent(role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
+    legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, **common)
     coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
     if mail and mail.mode != "off":
         for name, agent in (("Avery", marketing), ("Jordan", web), ("Cameron", legal), ("Morgan", coo)):
@@ -153,10 +184,10 @@ def build_crew(llm, search_key=None, verbose=False, mail=None, progress=None):
             # Template interpolation preserves absolute paths in CrewAI 1.6.1.
             output_file="{report_dir}/" + filename,
         )
-    brief = task(coo, "Start the cycle by reviewing the saved context. Define one concrete, finishable outcome for Avery, Jordan, and Cameron that advances the objective without repeating completed work. Keep nonblocking work moving even when a CEO decision is pending. Consolidate all genuine CEO questions into at most one section, but do not email the CEO during kickoff. Assign only work possible with the agents' stated tools; distinguish implementation from recommendations.", "cycle_brief.md")
-    marketing_task = task(marketing, "Use Morgan's cycle brief as your assignment. Complete the marketing outcome now rather than drafting another broad plan. Check sample blank inventory when relevant, then produce usable campaign copy, product decisions, research, or channel material. State evidence, exactly what changed, and the next owner. " + research, "marketing_campaign.md", [brief])
-    web_task = task(web, "Use Morgan's cycle brief as your assignment. Complete the storefront outcome now rather than repeating general requirements. Produce a usable specification, acceptance criteria, content structure, or implementation-ready decision within your available tools. Never claim code was deployed. State evidence, exactly what changed, and the next owner.", "web_dev_specs.md", [brief])
-    legal_task = task(legal, "Use Morgan's cycle brief as your assignment. Complete the policy or HR outcome now rather than repeating general advice. Produce usable draft language or a focused, sourced review and flag only a decision that truly blocks further work. State evidence, exactly what changed, and the next owner. " + research, "legal_terms.md", [brief])
+    brief = task(coo, "Start the cycle by reviewing the saved context. "+DEPARTMENT_RULES+" Use exactly these assignment headings: 'Avery — Marketing', 'Jordan — Web Development / IT', and 'Cameron — HR / Legal'. Define one concrete, finishable, department-aligned outcome for each agent without repeating completed work. Keep nonblocking work moving even when a CEO decision is pending. Consolidate all genuine CEO questions into at most one section, but do not email the CEO during kickoff. Assign only work possible with the agents' stated tools; distinguish implementation from recommendations.", "cycle_brief.md")
+    marketing_task = task(marketing, "Your permanent department is Marketing. Use only the Marketing portion of Morgan's brief. If the brief assigns you HR, Legal, Web Development, or IT work, reject that mismatch and continue with the highest-priority unfinished Marketing outcome. Complete usable campaign copy, audience work, merchandising, research, product positioning, or channel material. Check sample blank inventory only as a marketing dependency. State evidence, exactly what changed, and the next correctly assigned owner. " + research, "marketing_campaign.md", [brief])
+    web_task = task(web, "Your permanent department is Web Development and IT. Use only the Web Development / IT portion of Morgan's brief. If the brief assigns you Marketing, HR, or Legal work, reject that mismatch and continue with the highest-priority unfinished technical outcome. Produce a usable specification, acceptance criteria, content structure, integration plan, security review, or implementation-ready technical decision. Never claim code was deployed. State evidence, exactly what changed, and the next correctly assigned owner.", "web_dev_specs.md", [brief])
+    legal_task = task(legal, "Your permanent department is HR and Legal. Use only the HR / Legal portion of Morgan's brief. If the brief assigns you Marketing, Web Development, or IT work, reject that mismatch and continue with the highest-priority unfinished HR or Legal outcome. Produce usable draft language or a focused, sourced review and flag only a decision that truly blocks further work. State evidence, exactly what changed, and the next correctly assigned owner. " + research, "legal_terms.md", [brief])
     marketing_task.async_execution=True
     web_task.async_execution=True
     legal_task.async_execution=True
@@ -212,7 +243,7 @@ def main(argv=None):
         print(f"Running Onyx and Ink staff on Groq ({llm.model}). Free-tier pacing may pause between requests.")
         result = crew.kickoff(inputs=inputs)
         for report_path in (PROJECT_DIR/'reports').glob('*.md'):
-            report_path.write_text(normalize_report(report_path.read_text())+'\n')
+            report_path.write_text(normalize_report(enforce_department_ownership(report_path.read_text()))+'\n')
         mail.finish()
         progress.write('Cycle complete',status='complete',detail='Morgan completed the cycle review.')
         print(result)

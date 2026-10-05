@@ -55,6 +55,21 @@ class GroqTests(unittest.TestCase):
         self.assertIn('SAMPLE', result)
         self.assertIn('Not found', result)
 
+    def test_department_ownership_is_immutable_and_mislabeled_reports_are_fixed(self):
+        value = "\n".join(
+            (f"**Legal ({'Avery'}):** policy", f"**Marketing ({'Jordan'}):** campaign", f"**Web Dev ({'Cameron'}):** implementation")
+        )
+        fixed=main.enforce_department_ownership(value)
+        self.assertIn('HR / Legal (Cameron)',fixed);self.assertIn('Marketing (Avery)',fixed);self.assertIn('Web Development / IT (Jordan)',fixed)
+        llm=GroqLLM('offline-test-key')
+        try:
+            crew=main.build_crew(llm)
+            self.assertIn('Avery — Marketing',crew.tasks[0].description)
+            self.assertIn('permanent department is Marketing',crew.tasks[1].description)
+            self.assertIn('permanent department is Web Development and IT',crew.tasks[2].description)
+            self.assertIn('permanent department is HR and Legal',crew.tasks[3].description)
+        finally:llm.close()
+
     def test_request_and_token_pacing(self):
         budget = RequestBudget(2, 500)
         clock = [100.0]
