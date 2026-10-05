@@ -94,10 +94,25 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn('accepted',internal);self.assertIn('drafted locally',external);self.assertEqual(client.send_message.call_count,1)
             message=BytesParser(policy=policy.default).parsebytes((mail.outbox/'01-avery.eml').read_bytes())
             plain=message.get_body(preferencelist=('plain',)).get_content();rich=message.get_body(preferencelist=('html',)).get_content()
-            self.assertEqual(message['Cc'],'backup@example.com');self.assertEqual(message['Bcc'],'private@example.com')
+            self.assertIn('Jaunee | Vice President',message['Cc']);self.assertIn('backup@example.com',message['Cc']);self.assertEqual(message['Bcc'],'private@example.com')
             self.assertEqual(client.send_message.call_args_list[0].kwargs['to_addrs'],['owner@example.com','backup@example.com','private@example.com'])
             self.assertNotIn('##',plain);self.assertNotIn('**',plain);self.assertIn('• Tumbler',plain)
             self.assertIn('<h3',rich);self.assertIn('<strong>Approve</strong>',rich);self.assertIn('<ul',rich)
+
+    def test_james_and_jaunee_are_named_internal_executives(self):
+        with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP') as smtp:
+            client=MagicMock();client.send_message.return_value={};smtp.return_value=client;client.__enter__.return_value=client
+            addresses={**ADDRESSES,'Jaunee':'vp@example.com'}
+            creds={name:('account@example.com','local-test-password') for name in STAFF}
+            mail=StaffMail(directory,'draft',addresses,'smtp.example.com',587,'starttls',creds,internal_mode='send',important_cc='vp@example.com')
+            result=mail.deliver('Avery',['Jaunee'],'Decision needed','Please review this option.')
+            self.assertIn('accepted',result);self.assertEqual(client.send_message.call_count,1)
+            message=BytesParser(policy=policy.default).parsebytes(next(mail.outbox.glob('*.eml')).read_bytes())
+            self.assertIn('Jaunee | Vice President',message['To'])
+            self.assertEqual(client.send_message.call_args.kwargs['to_addrs'],['vp@example.com'])
+            mail.deliver('Avery',['James'],'CEO question','Please choose one option.',important=True)
+            james=BytesParser(policy=policy.default).parsebytes(sorted(mail.outbox.glob('*.eml'))[-1].read_bytes())
+            self.assertIn('James | CEO',james['To']);self.assertIn('Jaunee | Vice President',james['Cc'])
 
     def test_send_failure_is_not_retried_or_exposed(self):
         with tempfile.TemporaryDirectory() as directory, patch('smtplib.SMTP',side_effect=OSError('sensitive diagnostic')) as smtp:

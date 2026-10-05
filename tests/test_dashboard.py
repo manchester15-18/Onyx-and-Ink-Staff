@@ -89,6 +89,19 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(call.args[0],'Avery');self.assertEqual(call.args[2],'Christmas designs')
             self.assertEqual(call.kwargs['kind'],'compose');self.assertEqual(call.kwargs['reply_address'],'customer@example.com')
 
+    def test_compose_to_vice_president_uses_internal_delivery(self):
+        import json
+        with tempfile.TemporaryDirectory() as d,patch.object(dashboard,'ROOT',Path(d)),patch.object(dashboard,'dotenv_values',return_value={'STAFF_EMAIL_MODE':'send','OWNER_EMAIL':'ceo@example.com','IMPORTANT_CC_EMAIL':'vp@example.com'}),patch.object(dashboard.StaffMail,'from_env') as factory:
+            (Path(d)/'work').mkdir()
+            body=json.dumps({'to':'vp@example.com','subject':'Leadership question','body':'Please review.','sender':'Avery','requestId':'33333333-3333-3333-3333-333333333333'}).encode()
+            handler=dashboard.Handler.__new__(dashboard.Handler);handler.client_address=('127.0.0.1',1);handler.connection=None
+            handler.path='/api/compose';handler.rfile=io.BytesIO(body);handler.reply=Mock();handler.headers=Message()
+            for key,value in {'Host':'127.0.0.1:8765','Origin':'http://127.0.0.1:8765','X-Dashboard-Token':dashboard.TOKEN,'Content-Length':str(len(body))}.items():handler.headers[key]=value
+            factory.return_value.deliver.return_value='Email accepted by mail server; inbox delivery is not verified.'
+            handler.do_POST();self.assertEqual(handler.reply.call_args.args[0],200)
+            call=factory.return_value.deliver.call_args
+            self.assertEqual(call.args[1],['Jaunee']);self.assertIsNone(call.kwargs['reply_address'])
+
     def test_approve_sends_saved_draft_once(self):
         import json
         with tempfile.TemporaryDirectory() as d,patch.object(dashboard,'ROOT',Path(d)),patch.object(dashboard,'dotenv_values',return_value={'STAFF_EMAIL_MODE':'draft'}),patch.object(dashboard.StaffMail,'from_env') as factory:

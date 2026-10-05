@@ -339,3 +339,26 @@
 - Updated workspace_tools.py (`workspace_tools.py`).
 
 <!-- backup f10251889ebeb1a260759e8a0f418a7dd17ee65ec92550196dd2bcf9c223ce0c -->
+# 2026-10-05 — Executive names and internal email routing
+
+- Replaced customer-facing and agent-facing “Owner” labels with James, CEO.
+- Added Jaunee as Vice President and treated her configured email as an internal automatic-send recipient.
+- Added James and Jaunee titles to email headers, inbox views, settings, and agent instructions.
+
+## 2026-10-05 14:59 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated Gmail inbox access and message handling (`dashboard_mail.py`).
+- Updated inbox_monitor.py (`inbox_monitor.py`).
+- Updated main.py (`main.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_dashboard.py (`tests/test_dashboard.py`).
+- Updated tests/test_inbox_monitor.py (`tests/test_inbox_monitor.py`).
+- Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
+
+<!-- backup f3032133b3829ab01020673ce2016d5f471b275cd21dd92ec13e75c3bd8509c8 -->

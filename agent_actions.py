@@ -20,7 +20,7 @@ report {project:project name optional,title,text}; document {title,text}; spread
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
 design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; staff_reports {name:marketing,storefront,policy,operations,or all}; workspace_files {};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
-search {query}; webpage {url}. Workspace creation/upload is automatic. Email to Owner or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Email Owner only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
+search {query}; webpage {url}. Workspace creation/upload is automatic. Email to James (CEO), Jaunee (Vice President), or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
 
 class Actions:
     def __init__(self, root, agent, run_id, delete_ids=None):
@@ -114,10 +114,10 @@ class Actions:
             ids=a.get('attachments',[])
             if not isinstance(ids,list) or len(ids)>3:raise ValueError('Attach at most three generated files.')
             attachments=[self.file(i) for i in ids]
-            internal=to=='all_agents' or to in (*STAFF,'Owner')
+            internal=to=='all_agents' or to in (*STAFF,'Owner','James','Jaunee')
             mail=StaffMail.from_env(self.root,config=cfg) if internal else StaffMail.from_env(self.root,mode='draft',config=cfg)
             if to=='all_agents':result=mail.deliver(self.agent,list(STAFF),subject,body,attachments=attachments)
-            elif to in (*STAFF,'Owner'):result=mail.deliver(self.agent,[to],subject,body,attachments=attachments,important=to=='Owner')
+            elif to in (*STAFF,'Owner','James','Jaunee'):result=mail.deliver(self.agent,[to],subject,body,attachments=attachments,important=to in ('Owner','James'))
             elif valid_address(to):result=mail.deliver(self.agent,['Owner'],subject,body,kind='compose',reply_address=to,attachments=attachments)
             else:raise ValueError('Use a staff name or one valid recipient address.')
             return {'result':result,'approval':'Sent automatically to Onyx & Ink staff/CEO.' if internal else 'Review in Outbox and click Approve & send.','url':'/activity'}

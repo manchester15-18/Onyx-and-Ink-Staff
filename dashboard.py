@@ -195,7 +195,7 @@ def snapshot():
     return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),'workStatus':work_status,
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),'importantCc':config.get('IMPORTANT_CC_EMAIL',''),
         'signatures':signature_settings(ROOT,addresses,website),
-        'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
+        'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'James · CEO','email':config.get('OWNER_EMAIL','')},{'name':'Jaunee','label':'Jaunee · Vice President','email':config.get('IMPORTANT_CC_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
 
 def outbox_file(identifier):
@@ -438,7 +438,11 @@ class Handler(BaseHTTPRequestHandler):
                         mail=mail_from_config(config)
                         subject=original['subject'].replace('\r',' ').replace('\n',' ')[:190]
                         if not composing and not subject.lower().startswith('re:'):subject='Re: '+subject
-                        result=mail.deliver(sender,['Owner'],subject,body,kind='compose' if composing else 'manual',reply_address=original['replyTo'],
+                        internal_addresses={'Owner':config.get('OWNER_EMAIL',''),'Jaunee':config.get('IMPORTANT_CC_EMAIL',''),
+                                            **{name:config.get(key,'') for name,_,key in STAFF}}
+                        internal=next((name for name,address in internal_addresses.items() if address and address.lower()==original['replyTo'].lower()),None)
+                        result=mail.deliver(sender,[internal or 'Owner'],subject,body,kind='compose' if composing else 'manual',
+                            reply_address=None if internal else original['replyTo'],important=internal=='Owner',
                             in_reply_to=original['messageId'],references=original['references'] or None,attachments=attachments)
                         db.execute('UPDATE replies SET status=? WHERE id=?',(result,request_id));db.commit()
                         return self.reply(200,{'result':result})

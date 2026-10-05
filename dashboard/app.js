@@ -123,7 +123,7 @@ function draftCard(a){
 function approveBtn(a){const b=el('button','btn','Approve & send');b.onclick=()=>{$('detail').close();approveDraft(a)};return b}
 
 async function approveDraft(a){
-  if(busy.has(a.id))return;if(!await sure('Send “'+(a.subject||'(No subject)')+'” to '+a.to+' now? The configured owner BCC address is included.','Approve & send'))return;
+  if(busy.has(a.id))return;if(!await sure('Send “'+(a.subject||'(No subject)')+'” to '+a.to+' now? The configured CEO BCC address is included.','Approve & send'))return;
   busy.add(a.id);renderOutbox();
   try{const r=await api('approve',{id:a.id});toast(r.result,/unconfirmed/.test(r.result)?'warn':'ok')}
   catch(e){toast(e.message,'bad')}finally{busy.delete(a.id);sig='';await refresh()}}
@@ -186,7 +186,7 @@ async function openMail(id){
   try{const message=await api('message',{id});if(version!==readVersion)return;opened=message;replyId=crypto.randomUUID();replyAttachments=[];showAttachments('reply');
     $('mailSubject').textContent=opened.subject||'(No subject)';$('mailMeta').textContent=opened.from+' → '+opened.to+' · '+opened.date;$('mailBody').textContent=opened.body;
     const files=opened.attachmentDetails||[];$('mailAttachments').replaceChildren(...files.map(f=>{const a=el('a','fileChip',f.name+' · '+Math.ceil(f.size/1024)+' KB');a.href='/api/attachment?id='+encodeURIComponent(id)+'&part='+encodeURIComponent(f.part);return a}));
-    $('replyTo').textContent='→ '+opened.replyTo;const box=$('mailboxSelect').value;$('replySender').value=SENDERS.includes(box)?box:(S.agents.some(a=>a.name===agent)?agent:'Owner');
+    $('replyTo').textContent='→ '+opened.replyTo;const box=$('mailboxSelect').value;$('replySender').value=SENDERS.includes(box)?box:(box==='Jaunee'?'Owner':(S.agents.some(a=>a.name===agent)?agent:'Owner'));
     $('replyBody').value='';$('draftTag').hidden=true;$('sendReply').disabled=uploading>0;syncDrafter();$('reader').hidden=false;$('inboxNotice').textContent='';
     $('hideMail').textContent=inboxMessages.find(m=>m.id===id)?.dashboardHidden?'Restore to dashboard':'Hide from dashboard';renderInbox();$('reader').scrollIntoView({block:'nearest'});
   }catch(e){if(version===readVersion){$('inboxNotice').textContent=e.message;toast(e.message,'bad')}}
@@ -237,7 +237,7 @@ document.querySelectorAll('[data-tweak]').forEach(b=>b.addEventListener('click',
 
 async function sendReply(){const body=$('replyBody').value.trim();if(!opened||!body||drafting||$('sendReply').disabled)return;$('sendReply').disabled=true;
   try{await refresh();if(S.mode==='off')throw Error('Email is off. Select Draft or Live in Settings.');
-    if(S.mode==='send'&&!await sure('Send this reply to '+opened.replyTo+' now? The configured owner BCC address is included.')){$('sendReply').disabled=false;return}
+    if(S.mode==='send'&&!await sure('Send this reply to '+opened.replyTo+' now? The configured CEO BCC address is included.')){$('sendReply').disabled=false;return}
     const r=await api('reply',{id:opened.id,body,sender:$('replySender').value,requestId:replyId,attachments:replyAttachments.map(f=>f.id)});
     toast(r.result,/unconfirmed/.test(r.result)?'warn':'ok',S.mode==='draft'?['Open Outbox',()=>navigate('activity')]:null);
     $('replyBody').value='';replyAttachments=[];showAttachments('reply');$('draftTag').hidden=true;sig='';await refresh()}

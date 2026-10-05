@@ -15,6 +15,8 @@ from email.utils import formataddr, formatdate, getaddresses, make_msgid, parsea
 from pathlib import Path
 
 STAFF = ('Morgan', 'Avery', 'Jordan', 'Cameron')
+INTERNAL_RECIPIENTS = (*STAFF, 'Owner', 'Jaunee')
+RECIPIENT_LABELS = {'Owner':'James | CEO', 'Jaunee':'Jaunee | Vice President'}
 SIGNATURE_TITLES = {
     'Morgan':'Chief Operating Officer',
     'Avery':'Marketing Lead',
@@ -151,6 +153,8 @@ class StaffMail:
         for name in (*STAFF, 'Owner'):
             if not valid_address(self.addresses.get(name, '')):
                 raise ValueError(f'Set a valid {name.upper()}_EMAIL address before enabling staff email.')
+        if self.addresses.get('Jaunee') and not valid_address(self.addresses['Jaunee']):
+            raise ValueError('Set a valid IMPORTANT_CC_EMAIL address for Jaunee.')
         if len({self.addresses[n].lower() for n in STAFF}) != len(STAFF):
             raise ValueError('Each agent needs a distinct mailbox or authorized alias.')
         if mode == 'send' or internal_mode == 'send':
@@ -169,6 +173,7 @@ class StaffMail:
     def from_env(cls, project_dir, mode=None, config=None):
         get = os.getenv if config is None else config.get
         addresses = {name: get(f'{name.upper()}_EMAIL', '') for name in (*STAFF, 'Owner')}
+        addresses['Jaunee'] = get('IMPORTANT_CC_EMAIL', '')
         addresses['Shared'] = get('GOOGLE_MAIL_USER') or get('SMTP_USER', '')
         credentials = {name: (
             get(f'{name.upper()}_SMTP_USER') or get('SMTP_USER', ''),
@@ -207,11 +212,12 @@ class StaffMail:
             if kind not in ('reply', 'manual', 'compose') or not valid_address(reply_address):
                 raise ValueError("External addresses are supported only for inbox replies.")
             if not self.bcc:
-                raise ValueError("Configure Owner BCC before replying externally.")
+                raise ValueError("Configure the CEO BCC before replying externally.")
             recipients = ["Owner"]
+        recipients = ['Owner' if name in ('James','CEO') else name for name in recipients]
         recipients = list(dict.fromkeys(recipients))
-        if not recipients or any(name not in (*STAFF, "Owner") for name in recipients):
-            raise ValueError('Recipients must be Owner, Morgan, Avery, Jordan, or Cameron.')
+        if not recipients or any(name not in INTERNAL_RECIPIENTS or not valid_address(self.addresses.get(name,'')) for name in recipients):
+            raise ValueError('Recipients must be James, Jaunee, Morgan, Avery, Jordan, or Cameron.')
         if '\r' in subject or '\n' in subject or not subject.strip():
             raise ValueError('Email subject must be one non-empty line.')
         if self.count >= self.limit:
@@ -220,13 +226,13 @@ class StaffMail:
         message = EmailMessage()
         if not valid_address(self.addresses.get(sender,'')):
             raise ValueError('Configure the selected sender address.')
-        label = {'Owner':'CEO', 'Shared':'Shared inbox'}.get(sender,sender)
+        label = {'Owner':'James | CEO', 'Shared':'Shared inbox'}.get(sender,sender)
         message['From'] = formataddr((f'{label} | Onyx and Ink', self.addresses[sender]))
-        message['To'] = reply_address or ', '.join(formataddr((name, self.addresses[name])) for name in recipients)
+        message['To'] = reply_address or ', '.join(formataddr((RECIPIENT_LABELS.get(name,name), self.addresses[name])) for name in recipients)
         copy_owner = important and 'Owner' in recipients and reply_address is None
         copy_bcc = self.bcc if reply_address is not None or copy_owner else ''
-        copy_cc = self.important_cc if copy_owner else ''
-        if copy_cc:message['Cc'] = copy_cc
+        copy_cc = self.important_cc if copy_owner and 'Jaunee' not in recipients else ''
+        if copy_cc:message['Cc'] = formataddr((RECIPIENT_LABELS['Jaunee'],copy_cc))
         if copy_bcc:message['Bcc'] = copy_bcc
         message['Reply-To'] = self.addresses[sender]
         message['Subject'] = subject[:200]
@@ -240,7 +246,7 @@ class StaffMail:
             message['In-Reply-To'] = in_reply_to
         if references:
             message['References'] = references
-        signature = self.signatures.get(sender,('CEO' if sender == 'Owner' else 'Onyx & Ink Team') + '\nOnyx & Ink')
+        signature = self.signatures.get(sender,('James\nChief Executive Officer' if sender == 'Owner' else 'Onyx & Ink Team') + '\nOnyx & Ink')
         clean_body=markdown_to_plain(body[:30000])
         message.set_content(clean_body + '\n\n' + signature + '\n')
         signature_html='<br>'.join(html.escape(line) for line in signature.splitlines())
@@ -252,7 +258,7 @@ class StaffMail:
         )
         if forwarded_message is not None:
             if kind != 'forward' or recipients != ['Owner']:
-                raise ValueError('Original mail can only be forwarded to Owner.')
+                raise ValueError('Original mail can only be forwarded to James, the CEO.')
             message.add_attachment(forwarded_message)
         attachment_total = 0
         for attachment in attachments or []:
@@ -388,14 +394,16 @@ class StaffMail:
         from crewai.tools import tool
         @tool(f'Email from {sender}')
         def email_staff(recipients: list[str], subject: str, body: str) -> str:
-            """Email Owner or named coworkers Morgan, Avery, Jordan, Cameron.
+            """Email James (CEO), Jaunee (Vice President), or named coworkers Morgan, Avery, Jordan, Cameron.
             Use one JSON object with recipients (a list of names), subject, and body.
             Only internal configured recipients are supported. Draft mode saves without sending.
+            Address James as CEO and Jaunee as Vice President in executive correspondence.
             Write as a friendly coworker with a natural subject and greeting. Do not use workflow jargon
             such as task handoff or artifact. Do not add a sign-off; one is appended.
             """
             if self.tool_count >= 4:
                 return "Agent email-tool limit reached; report delivery slots are reserved."
+            recipients=['Owner' if name in ('James','CEO') else name for name in recipients]
             if 'Owner' in recipients and not allow_owner:
                 return 'Coordinate this question with Morgan. Morgan will decide whether CEO input is required.'
             self.tool_count += 1

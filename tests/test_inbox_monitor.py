@@ -50,6 +50,12 @@ class InboxTests(unittest.TestCase):
             self.assertIsNone(message_route(forged,mail))
             self.assertIn('Christmas',plain_body(email()))
 
+    def test_vice_president_is_routed_as_internal(self):
+        with tempfile.TemporaryDirectory() as d:
+            addresses={**ADDRESSES,'Jaunee':'vp@example.com'}
+            mail=StaffMail(d,'draft',addresses,important_cc='vp@example.com')
+            self.assertEqual(message_route(email('vp@example.com','avery@example.com'),mail),('Avery','Jaunee'))
+
     def test_baseline_new_message_restart_duplicate_and_threading(self):
         FakeIMAP.messages={1:email().as_bytes()}
         with tempfile.TemporaryDirectory() as d,patch('imaplib.IMAP4_SSL',FakeIMAP):
@@ -88,7 +94,7 @@ class InboxTests(unittest.TestCase):
                 contents=(mail.outbox/'02-avery.eml').read_text()
                 forward=(mail.outbox/'01-avery.eml').read_text()
                 self.assertIn('message/rfc822',forward)
-                self.assertIn('To: Owner <owner@example.com>',forward)
+                self.assertIn('To: James | CEO <owner@example.com>',forward)
                 parsed=Parser(policy=policy.default).parsestr(contents)
                 self.assertIn('forwarded to our CEO',parsed.get_body(preferencelist=('plain',)).get_content())
                 self.assertIn('To: customer@example.com',contents)

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from main import PROJECT_DIR, credential, positive_int
 from crewai import Agent, Crew, Process, Task
 from groq_llm import GroqLLM
-from staff_email import StaffMail, STAFF, valid_address
+from staff_email import INTERNAL_RECIPIENTS, StaffMail, STAFF, valid_address
 
 ROLES = {'Morgan':'COO and operations', 'Avery':'marketing and campaigns',
          'Jordan':'web development and storefront requirements', 'Cameron':'legal/HR policy drafts'}
@@ -59,7 +59,7 @@ def message_route(message, mail):
     fields = [str(message.get(header,'')) for header in ('To','Cc','Delivered-To','X-Original-To')]
     recipients = list(dict.fromkeys(address.lower() for _, address in getaddresses([field for field in fields if field])))
     targets = [name for address in recipients for name in STAFF if mail.addresses[name].lower() == address]
-    # A message to Owner is handled by Morgan; a multi-alias message gets one reply.
+    # A message to James at the CEO address is handled by Morgan.
     if not targets and mail.addresses['Owner'].lower() in recipients:
         targets = ['Morgan']
     if not targets:
@@ -207,7 +207,7 @@ class InboxMonitor:
                 message=BytesParser(policy=policy.default).parsebytes(raw)
                 route=message_route(message,self.mail)
                 body=plain_body(message)
-                if not route or (not body and route[1] in (*STAFF, 'Owner')):
+                if not route or (not body and route[1] in INTERNAL_RECIPIENTS):
                     self._record(mailbox,validity,uid,'skipped')
                     continue
                 original_id = str(message.get('Message-ID',''))
@@ -221,7 +221,7 @@ class InboxMonitor:
                 self._record(mailbox,validity,uid,'reserved')
                 staff,recipient=route
                 try:
-                    external = recipient not in (*STAFF, 'Owner')
+                    external = recipient not in INTERNAL_RECIPIENTS
                     if external:
                         outcome = self.mail.deliver(staff, ['Owner'], 'External email escalated to CEO',
                             'An outside email requires your review. The original email is attached.',
@@ -238,7 +238,7 @@ class InboxMonitor:
                     subject=str(message.get('Subject','')).replace('\r',' ').replace('\n',' ')[:190]
                     if not subject.lower().startswith('re:'):
                         subject='Re: '+subject
-                    outcome=self.mail.deliver(staff,[recipient],subject,reply,kind='reply',in_reply_to=message_id,references=references or None, reply_address=recipient if recipient not in (*STAFF, 'Owner') else None)
+                    outcome=self.mail.deliver(staff,[recipient],subject,reply,kind='reply',in_reply_to=message_id,references=references or None, reply_address=recipient if recipient not in INTERNAL_RECIPIENTS else None)
                     self.db.execute('UPDATE processed SET state=? WHERE mailbox=? AND validity=? AND uid=?',
                                     (outcome,mailbox,validity,uid)); self.db.commit()
                     handled+=1
@@ -283,7 +283,7 @@ def main(argv=None):
             sender=parseaddr(message.get('From',''))[1].lower()
             if sender==mail.addresses['Owner'].lower():
                 return continue_owner_reply(chat,staff,message,body)
-            sender_name=next((name for name in STAFF if mail.addresses[name].lower()==sender),None)
+            sender_name=next((name for name in (*STAFF,'Jaunee') if mail.addresses.get(name,'').lower()==sender),None)
             if sender_name:
                 return continue_staff_message(chat,staff,sender_name,message,body)
             return generate_reply(llm,staff,message,body)

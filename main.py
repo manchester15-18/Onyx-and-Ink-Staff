@@ -194,11 +194,11 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
         for name, agent in (("Avery", marketing), ("Jordan", web), ("Cameron", legal), ("Morgan", coo)):
             agent.tools.append(mail.tool_for(name,allow_owner=name=='Morgan'))
             agent.backstory += (
-                f" Your email address is {mail.addresses[name]}. You may email Owner or named coworkers "
+                f" Your email address is {mail.addresses[name]}. You may email James (CEO), Jaunee (Vice President), or named coworkers "
                 "when a specific question, assignment, or decision needs their attention. "
                 "Write internal email like a concise, friendly coworker. Use a natural subject, greeting, and plain language. Never use workflow jargon such as 'task handoff' or 'artifact'. "
-                "Internal staff and Owner email sends automatically. Email Owner only for an urgent risk, blocking decision, or one specific answer needed to complete useful work; keep it under 120 words and state the requested response clearly. The inbox monitor will route the authenticated reply back to you for follow-up. "
-                "Routine updates and completion reports stay in the dashboard; do not email them to Owner. "
+                "Internal staff, James, and Jaunee email sends automatically. Email James only for an urgent risk, blocking decision, or one specific answer needed to complete useful work; keep it under 120 words and state the requested response clearly. The inbox monitor will route authenticated replies from James or Jaunee back to you for follow-up. "
+                "Routine updates and completion reports stay in the dashboard; do not email them to James. "
                 "A separate inbox monitor handles incoming replies. Do not claim to have received a reply unless it is supplied in your task context."
             )
     research = "Use web search for current claims." if search_key else "Web search is unavailable; clearly label market ideas as assumptions and list research needed."

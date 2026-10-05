@@ -28,7 +28,7 @@ class Mailbox:
     def list(self, refresh=False, mailbox="all", page_token=None):
         with self.lock:
             config=dotenv_values(self.root/'.env')
-            names={'Owner':'OWNER_EMAIL','Morgan':'MORGAN_EMAIL','Avery':'AVERY_EMAIL','Jordan':'JORDAN_EMAIL','Cameron':'CAMERON_EMAIL','Shared':'GOOGLE_MAIL_USER'}
+            names={'Owner':'OWNER_EMAIL','Jaunee':'IMPORTANT_CC_EMAIL','Morgan':'MORGAN_EMAIL','Avery':'AVERY_EMAIL','Jordan':'JORDAN_EMAIL','Cameron':'CAMERON_EMAIL','Shared':'GOOGLE_MAIL_USER'}
             if mailbox != 'all' and mailbox not in names:raise ValueError('Unknown inbox.')
             # Named mailboxes are virtual views over aliases that share one Google
             # account. Gmail often stores alias-to-alias mail only in Sent, so an
@@ -87,7 +87,7 @@ class Mailbox:
         refs=' '.join(re.findall(r'<[^\s<>]+>',h.get('references',''))[-10:]+([mid] if mid else []))
         reply_to=parseaddr(h.get('from',''))[1]
         labels=set(msg.get('labelIds',[]));config=dotenv_values(self.root/'.env')
-        internal_addresses={str(config.get(key,'')).lower() for key in ('MORGAN_EMAIL','AVERY_EMAIL','JORDAN_EMAIL','CAMERON_EMAIL')}
+        internal_addresses={str(config.get(key,'')).lower() for key in ('OWNER_EMAIL','IMPORTANT_CC_EMAIL','MORGAN_EMAIL','AVERY_EMAIL','JORDAN_EMAIL','CAMERON_EMAIL')}
         requested_reply=parseaddr(h.get('reply-to',''))[1]
         if 'SENT' in labels and h.get('x-onyx-ink-kind') in ('message','handoff','failure') and requested_reply.lower() in internal_addresses:
             reply_to=requested_reply
