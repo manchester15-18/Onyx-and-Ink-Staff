@@ -82,6 +82,13 @@ class Workspace:
     def append_doc(self,identifier,text):
         identifier=self.own(identifier,'doc')
         return self.request('POST','https://docs.googleapis.com/v1/documents/'+identifier+':batchUpdate',json={'requests':[{'insertText':{'endOfSegmentLocation':{},'text':text+'\n'}}]})
+    def replace_doc(self,identifier,text):
+        """Replace the body of an app-created Doc while retaining its stable link."""
+        document=self.read_doc(identifier);end=max((part.get('endIndex',1) for part in document.get('body',{}).get('content',[])),default=1)
+        requests=[]
+        if end>2:requests.append({'deleteContentRange':{'range':{'startIndex':1,'endIndex':end-1}}})
+        requests.append({'insertText':{'location':{'index':1},'text':text.rstrip()+'\n'}})
+        return self.request('POST','https://docs.googleapis.com/v1/documents/'+self.own(identifier,'doc')+':batchUpdate',json={'requests':requests})
     def create_sheet(self,title,values):
         sheet=self.request('POST','https://sheets.googleapis.com/v4/spreadsheets',json={'properties':{'title':title}});identifier=sheet['spreadsheetId'];self.register(identifier,'sheet')
         self.write_sheet(identifier,'Sheet1!A1',values);return {'id':identifier,'url':sheet['spreadsheetUrl']}

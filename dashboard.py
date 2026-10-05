@@ -2,6 +2,7 @@
 import json
 from contextlib import closing
 import os
+import re
 from pathlib import Path
 import secrets
 import ssl
@@ -25,6 +26,7 @@ from delivery_tracking import check_delivery
 from inbox_state import InboxState
 from staff_autonomy import StaffAutonomy
 from report_projects import create_report, delete_project, delete_report, ensure_project, projects
+from report_records import export_google_doc, metadata as report_metadata, report_pdf
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -181,7 +183,10 @@ def snapshot():
         if report_group:
             try:owner=relative.parts[relative.parts.index(report_group)+1].title()
             except IndexError:pass
-        reports.append({'id':str(relative),'name':report_display_name(path,relative),'agent':owner,'project':project,'body':clean(normalize_report(path.read_text()[:50000]))})
+        meta=report_metadata(ROOT,path)
+        reports.append({'id':str(relative),'name':meta['title'],'agent':owner,'project':project,
+                        'created':meta['created'],'edited':meta['edited'],'googleUrl':meta.get('googleUrl',''),
+                        'googleStatus':meta.get('googleStatus',''),'body':clean(normalize_report(path.read_text()[:50000]))})
     tools=Actions(ROOT,'Morgan','dashboard-status')
     artifacts=tools.files()
     addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
@@ -240,6 +245,14 @@ class Handler(BaseHTTPRequestHandler):
                 kind={'.png':'image/png','.md':'text/plain; charset=utf-8'}.get(file.suffix,'application/octet-stream')
                 return self.reply(200,file.read_bytes(),kind)
             except (ValueError,OSError):return self.reply(404,{'error':'Generated file not found.'})
+        if path=='/api/report-pdf':
+            try:
+                from urllib.parse import quote
+                identifier=parse_qs(urlparse(self.path).query).get('id',[''])[0]
+                title,content=report_pdf(ROOT,identifier)
+                filename=re.sub(r'[^A-Za-z0-9._-]+','-',title).strip('-')[:100] or 'report'
+                return self.reply(200,content,'application/pdf',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename+'.pdf',safe='')})
+            except (ValueError,OSError):return self.reply(404,{'error':'Report not found.'})
         names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/files':'index.html','/app.js':'app.js','/style.css':'style.css'}
         if path not in names:return self.reply(404,{'error':'Not found.'})
         name=names[path];kind={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
@@ -339,6 +352,9 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/create-report':
                     result=create_report(ROOT,str(data.get('project','')),str(data.get('agent','')),str(data.get('title','')),clean(str(data.get('body',''))))
                     return self.reply(200,{'message':'Report created in '+result['project_name']+'.','report':result})
+                elif self.path=='/api/export-report':
+                    result=export_google_doc(ROOT,str(data.get('id','')),force=True)
+                    return self.reply(200,{'message':'Google Doc created or updated.','url':result['url']})
                 elif self.path=='/api/delete-report':
                     if data.get('confirm') is not True:raise ValueError()
                     identifier=str(data.get('id',''))

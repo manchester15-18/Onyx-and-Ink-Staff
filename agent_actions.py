@@ -51,9 +51,12 @@ class Actions:
         else:
             slug,label,folder=active_project(self.root)
         assignment=folder/'agent-drafts'/self.agent.lower();assignment.mkdir(parents=True,exist_ok=True)
-        cleaned=self.clean(text);identifier=uuid.uuid4().hex
+        cleaned=self.clean(text);identifier=uuid.uuid4().hex;report_text=cleaned
+        if not re.search(r'(?m)^#\s+',report_text):report_text='# '+str(title).strip()+'\n\n'+report_text
         path=assignment/(project_slug(title)+'-'+identifier[:8]+'.md')
-        path.write_text(cleaned+('' if cleaned.endswith('\n') else '\n'));path.chmod(0o600)
+        path.write_text(report_text+('' if report_text.endswith('\n') else '\n'));path.chmod(0o600)
+        from report_records import auto_export_reference
+        auto_export_reference(self.root,path)
         result=self.save(title,cleaned.encode(),'.md','project-report')
         result.update({'project':slug,'project_name':label,'dashboard':'/reports'})
         return result

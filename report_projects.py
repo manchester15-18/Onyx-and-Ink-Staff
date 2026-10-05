@@ -86,7 +86,10 @@ def create_report(root,project,agent,title,body):
     slug,label,folder=ensure_project(root,project)
     destination=folder/'manual'/agent.lower();destination.mkdir(parents=True,exist_ok=True)
     path=destination/(project_slug(title)+'-'+uuid.uuid4().hex[:8]+'.md')
+    if not re.search(r'(?m)^#\s+',body):body='# '+title+'\n\n'+body
     path.write_text(body+'\n');path.chmod(0o600)
+    from report_records import auto_export_reference
+    auto_export_reference(root,path)
     return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label}
 
 

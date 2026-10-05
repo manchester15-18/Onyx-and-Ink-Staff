@@ -234,6 +234,8 @@ def run_assignments(tasks):
         for future in as_completed(futures):
             name=futures[future];output=future.result()
             finalize_assignment_report(tasks[name].output_file,name,output)
+            from report_records import auto_export_reference
+            auto_export_reference(PROJECT_DIR,tasks[name].output_file)
             outputs[name]=output
     return outputs
 

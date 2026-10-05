@@ -318,3 +318,24 @@
 - Updated tests/test_report_projects.py (`tests/test_report_projects.py`).
 
 <!-- backup 0c3e42d356b2e9798e64d3157f664ad1254298a4408600d76ea3a09e6675d857 -->
+# 2026-10-05 — Report records and exports
+
+- Named reports from their assignment heading and added stable created and last-edited timestamps.
+- Added per-report PDF downloads and one-click Google Docs creation or update.
+- Added automatic Google Docs archiving for terms, policies, procedures, handbooks, and other internal reference material.
+
+## 2026-10-05 14:42 EDT — Application update
+
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard appearance and responsive layout (`dashboard/style.css`).
+- Updated main.py (`main.py`).
+- Updated report_projects.py (`report_projects.py`).
+- Updated report_records.py (`report_records.py`).
+- Updated tests/test_report_records.py (`tests/test_report_records.py`).
+- Updated tests/test_workspace_tools.py (`tests/test_workspace_tools.py`).
+- Updated workspace_tools.py (`workspace_tools.py`).
+
+<!-- backup f10251889ebeb1a260759e8a0f418a7dd17ee65ec92550196dd2bcf9c223ce0c -->
