@@ -18,7 +18,7 @@ import uuid
 from dotenv import load_dotenv
 from main import PROJECT_DIR, credential, positive_int
 from crewai import Agent, Crew, Process, Task
-from groq_llm import GroqLLM
+from agent_models import build_staff_llms
 from staff_email import INTERNAL_RECIPIENTS, StaffMail, STAFF, valid_address
 
 ROLES = {'Morgan':'COO and operations', 'Avery':'marketing and campaigns',
@@ -275,8 +275,7 @@ def main(argv=None):
         user=mail.oauth.user if mail.oauth else os.getenv('IMAP_USER') or os.getenv('SMTP_USER','')
         password=os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD','')
         interval=positive_int('INBOX_POLL_SECONDS',60)
-        llm=GroqLLM(credential('GROQ_API_KEY'),model=os.getenv('GROQ_MODEL','qwen/qwen3.8-27b'),
-                    rpm=positive_int('GROQ_RPM',25),tpm=positive_int('GROQ_TPM',8000),max_tokens=positive_int('GROQ_MAX_COMPLETION_TOKENS',1000))
+        llm=build_staff_llms(os.environ)
         from agent_chat import AgentChat
         chat=AgentChat(PROJECT_DIR)
         def reply(staff,message,body):
@@ -286,7 +285,7 @@ def main(argv=None):
             sender_name=next((name for name in (*STAFF,'Jaunee') if mail.addresses.get(name,'').lower()==sender),None)
             if sender_name:
                 return continue_staff_message(chat,staff,sender_name,message,body)
-            return generate_reply(llm,staff,message,body)
+            return generate_reply(llm.get(staff) or llm['Morgan'],staff,message,body)
         monitor=InboxMonitor(PROJECT_DIR,mail,reply,user,password,
                              host=os.getenv('IMAP_HOST','imap.gmail.com'),limit=positive_int('INBOX_BATCH_LIMIT',5),oauth=mail.oauth)
         if args.check:
@@ -312,8 +311,8 @@ def main(argv=None):
         return 0
     finally:
         if monitor: monitor.close()
-        if chat and chat.llm: chat.llm.close()
-        if llm: llm.close()
+        if chat: chat.close()
+        for client in (llm or {}).values(): client.close()
 
 
 if __name__=='__main__':

@@ -51,17 +51,34 @@ class RequestBudget:
                 time.sleep(min(delay, 60))
 
 
-class GroqLLM(OpenAICompletion):
-    """Use the installed native client, without LiteLLM or Gemini dependencies."""
+_SHARED_BUDGETS = {}
+_SHARED_LOCK = threading.Lock()
 
-    def __init__(self, api_key, model="qwen/qwen3.8-27b", rpm=25, tpm=8000, max_tokens=1000, timeout=60, max_retries=3):
-        model = model.removeprefix("groq/")
-        self.budget = RequestBudget(rpm, tpm)
+
+def shared_budget(provider, rpm, tpm):
+    """One pacing budget per provider so agents that share an account share its limits."""
+    with _SHARED_LOCK:
+        budget = _SHARED_BUDGETS.get(provider)
+        if budget is None:
+            budget = _SHARED_BUDGETS[provider] = RequestBudget(rpm, tpm)
+        return budget
+
+
+class GroqLLM(OpenAICompletion):
+    """OpenAI-compatible CrewAI client for Groq and other free-tier providers."""
+
+    def __init__(self, api_key, model="qwen/qwen3.8-27b", rpm=25, tpm=8000, max_tokens=1000, timeout=60, max_retries=3,
+                 base_url=GROQ_BASE_URL, provider="groq", label="Groq", budget=None):
+        if provider == "groq":
+            model = model.removeprefix("groq/")
+        self.service = provider
+        self.service_label = label
+        self.budget = budget or RequestBudget(rpm, tpm)
         http_client = httpx.Client(event_hooks={"request": [self.budget.before_request]})
         super().__init__(
             model=model,
             api_key=api_key,
-            base_url=GROQ_BASE_URL,
+            base_url=base_url,
             temperature=0.3,
             max_completion_tokens=max_tokens,
             timeout=timeout,
@@ -88,6 +105,8 @@ class GroqLLM(OpenAICompletion):
         params = super()._prepare_completion_params(messages, tools)
         # GPT-OSS uses its own completion boundaries; omit stop/prefill parameters.
         params.pop("stop", None)
+        if self.service != "groq":
+            return self._provider_params(params, tools)
         if self.model.startswith("openai/gpt-oss-"):
             params["reasoning_effort"] = "low"
             # CrewAI expects ReAct tool instructions in message.content. GPT-OSS can
@@ -104,6 +123,25 @@ class GroqLLM(OpenAICompletion):
             params["reasoning_effort"] = "none"
             if tools:
                 params["parallel_tool_calls"] = False
+        return params
+
+    def _provider_params(self, params, tools):
+        # Groq-only fields (include_reasoning, max_completion_tokens) are rejected or
+        # ignored by some compatible endpoints, so use the universal max_tokens.
+        params.pop("extra_body", None)
+        if self.service != "cerebras" and "max_completion_tokens" in params:
+            params["max_tokens"] = params.pop("max_completion_tokens")
+        if self.service == "gemini":
+            # Gemini Pro cannot disable thinking; low keeps the visible answer within budget.
+            params["reasoning_effort"] = "low"
+            params.pop("parallel_tool_calls", None)
+        elif self.service == "cerebras":
+            if "gpt-oss" in self.model:
+                params["reasoning_effort"] = "low"
+            if tools:
+                params["parallel_tool_calls"] = False
+        else:
+            params.pop("parallel_tool_calls", None)
         return params
 
     def call(
@@ -145,8 +183,8 @@ class GroqLLM(OpenAICompletion):
                     ),
                 })
         raise ValueError(
-            "Groq returned three empty visible responses. Try the run again or choose a "
-            "different GROQ_MODEL; CrewAI cannot use reasoning-only output."
+            f"{self.service_label} returned three empty visible responses. Try the run again or choose a "
+            "different model; CrewAI cannot use reasoning-only output."
         )
 
     def supports_stop_words(self):

@@ -14,7 +14,7 @@ ROLES={'Morgan':'Chief Operating Officer','Avery':'Marketing lead','Jordan':'IT 
 
 class AgentChat:
     def __init__(self,root):
-        self.root=Path(root);self.lock=threading.Lock();self.model_lock=threading.Lock();self.draft_lock=threading.Lock();self.llm=None;self.draft_llm=None
+        self.root=Path(root);self.lock=threading.Lock();self.model_lock=threading.Lock();self.draft_lock=threading.Lock();self.llm=None;self.draft_llm=None;self.llms={};self.draft_llms={}
     def db(self):
         self.root.joinpath('work').mkdir(exist_ok=True)
         db=sqlite3.connect(self.root/'work'/'agent-chat.sqlite3')
@@ -44,28 +44,29 @@ class AgentChat:
         for item in history:messages.append({'role':item['role'],'content':item['body'][:800]})
         messages.append({'role':'user','content':body})
         try:
-            llm=self.get_llm(cfg)
+            llm=self.get_llm(cfg,agent)
             if cfg.get('AGENT_TOOLS_ENABLED') == 'true' and (source in ('email','staff_email') or self.needs_tools(body)):answer=self.act(agent,messages,request_id,llm,source=source)
             else:answer=str(llm.call(messages))[:10000]
             for key,value in cfg.items():
                 if value and any(word in key.upper() for word in ('KEY','TOKEN','PASSWORD','SECRET')):answer=answer.replace(value,'[REDACTED]')
-        except Exception:answer='I could not reach the AI service. Check Groq connectivity and quota, then send a new message.'
+        except Exception:answer='I could not reach the AI service. Check AI provider connectivity and quota, then send a new message.'
         with self.lock:
             with closing(self.db()) as db:
                 db.execute('INSERT INTO messages(agent,role,body,source) VALUES (?,?,?,?)',(agent,'assistant',answer,source))
                 db.execute('UPDATE requests SET answer=? WHERE id=?',(answer,request_id));db.commit();return answer
 
-    def get_llm(self,cfg):
+    def get_llm(self,cfg,agent='Morgan'):
+        """Return the agent's assigned model; a preset self.llm overrides all agents."""
         with self.model_lock:
-            if self.llm is None:
-                from groq_llm import GroqLLM
-                if not cfg.get('GROQ_API_KEY'):raise ValueError()
-                try:max_tokens=max(600,min(1200,int(cfg.get('GROQ_MAX_COMPLETION_TOKENS','1000'))))
-                except ValueError:max_tokens=1000
-                try:rpm=max(1,min(100,int(cfg.get('GROQ_RPM','25'))));tpm=max(2000,min(100000,int(cfg.get('GROQ_TPM','8000'))))
-                except ValueError:rpm,tpm=25,8000
-                self.llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','qwen/qwen3.8-27b'),rpm=rpm,tpm=tpm,max_tokens=max_tokens,timeout=45,max_retries=1)
-            return self.llm
+            if self.llm is not None:return self.llm
+            if agent not in self.llms:
+                from agent_models import build_llm
+                self.llms[agent]=build_llm(agent,cfg,max_tokens=1200,timeout=60,max_retries=1)
+            return self.llms[agent]
+
+    def close(self):
+        for client in [*self.llms.values(),*self.draft_llms.values()]:client.close()
+        self.llms.clear();self.draft_llms.clear()
 
     @staticmethod
     def needs_tools(body):
@@ -92,12 +93,14 @@ class AgentChat:
         ]
         with self.draft_lock:
             try:
-                if self.draft_llm is None:
-                    from groq_llm import GroqLLM
-                    if not cfg.get('GROQ_API_KEY'):raise RuntimeError()
-                    self.draft_llm=GroqLLM(cfg['GROQ_API_KEY'],model=cfg.get('GROQ_MODEL','qwen/qwen3.8-27b'),max_tokens=600,timeout=30,max_retries=1)
-                answer=str(self.draft_llm.call(messages))[:8000].strip()
-            except Exception:raise RuntimeError('The drafting service did not respond. Try again after the Groq limit resets.') from None
+                llm=self.draft_llm
+                if llm is None:
+                    if agent not in self.draft_llms:
+                        from agent_models import build_llm
+                        self.draft_llms[agent]=build_llm(agent,cfg,max_tokens=600,timeout=45,max_retries=1)
+                    llm=self.draft_llms[agent]
+                answer=str(llm.call(messages))[:8000].strip()
+            except Exception:raise RuntimeError('The drafting service did not respond. Try again after the AI provider limit resets.') from None
         for key,value in cfg.items():
             if value and any(word in key.upper() for word in ('KEY','TOKEN','PASSWORD','SECRET')):answer=answer.replace(value,'[REDACTED]')
         return answer

@@ -23,7 +23,7 @@ from dotenv import load_dotenv
 from crewai import Agent, Task
 from crewai.tools import tool
 from openai import APIConnectionError, APIStatusError
-from groq_llm import GroqLLM
+from agent_models import build_staff_llms, describe
 from staff_email import StaffMail
 from report_format import normalize_report
 from report_projects import active_project, ensure_project
@@ -222,11 +222,13 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
         "Keep any required Thought under 25 words, then immediately use a tool or provide the Final Answer. Never return reasoning-only output. Never refer to work as a cycle; call it an assignment. "
         "If web search reports unavailable, do not retry it; continue with clearly labeled assumptions."
     )
-    common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=3, verbose=verbose)
-    marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools], **common)
-    web = Agent(role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
-    legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, **common)
-    coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
+    def llm_for(name):
+        return llm[name] if isinstance(llm, dict) else llm
+    common = dict(allow_delegation=False, max_retry_limit=0, max_iter=3, verbose=verbose)
+    marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools], llm=llm_for("Avery"), **common)
+    web = Agent(role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, llm=llm_for("Jordan"), **common)
+    legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, llm=llm_for("Cameron"), **common)
+    coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, llm=llm_for("Morgan"), **common)
     if mail and mail.mode != "off":
         for name, agent in (("Avery", marketing), ("Jordan", web), ("Cameron", legal), ("Morgan", coo)):
             agent.tools.append(mail.tool_for(name,allow_owner=name=='Morgan'))
@@ -323,14 +325,10 @@ def main(argv=None):
                 print('Another staff run is already active. Wait for it to finish or stop autonomous staff in Settings.')
                 return 1
         mail = StaffMail.from_env(PROJECT_DIR)
-        key = credential("GROQ_API_KEY")
+        for name in ("GROQ_API_KEY", "GEMINI_API_KEY", "CEREBRAS_API_KEY", "CODESTRAL_API_KEY"):
+            credential(name, required=False)
         search_key = credential("TAVILY_API_KEY", required=False)
-        llm = GroqLLM(
-            key, model=os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
-            rpm=positive_int("GROQ_RPM", 25), tpm=positive_int("GROQ_TPM", 8000),
-            max_tokens=positive_int("GROQ_MAX_COMPLETION_TOKENS", 1000),
-            max_retries=0,
-        )
+        llm = build_staff_llms(os.environ, max_retries=0)
         if not args.check:
             search_key = verified_search_key(search_key)
         assignment_id=args.assignment_id or datetime.now().strftime('%Y%m%d-%H%M')+'-'+uuid.uuid4().hex[:6]
@@ -340,10 +338,10 @@ def main(argv=None):
         report_dir.mkdir(parents=True, exist_ok=True)
         tasks=build_assignments(llm,args.directive,report_dir,search_key,args.verbose,mail,progress=None if args.check else progress)
         if args.check:
-            print(f"Setup OK: Groq model {llm.model}, four independent agents and four assignments. Web search: {'configured (not verified)' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
+            print(f"Setup OK: {describe(llm)}; four independent agents and four assignments. Web search: {'configured (not verified)' if search_key else 'disabled'}. Email: {mail.mode}. No API calls made; key validity is not checked.")
             return 0
         progress.write(detail='Morgan, Avery, Jordan, and Cameron are working independently.')
-        print(f"Running four independent Onyx and Ink agents on Groq ({llm.model}). Shared pacing may pause requests to protect usage limits.")
+        print(f"Running four independent Onyx and Ink agents ({describe(llm)}). Per-provider pacing may pause requests to protect usage limits.")
         result = run_assignments(tasks)
         for report_path in report_dir.glob('*.md'):
             report_path.write_text(normalize_report(enforce_department_ownership(report_path.read_text()))+'\n')
@@ -384,8 +382,8 @@ def main(argv=None):
             mail.failure("The staff run stopped unexpectedly. Check the local run output.")
         raise
     finally:
-        if llm:
-            llm.close()
+        for client in (llm.values() if isinstance(llm, dict) else [llm] if llm else []):
+            client.close()
         if run_lock:
             fcntl.flock(run_lock,fcntl.LOCK_UN);run_lock.close()
 
