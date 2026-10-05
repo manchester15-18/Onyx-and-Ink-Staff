@@ -5,6 +5,8 @@
 !/README.md
 !/CHANGELOG.md
 !/requirements.txt
+!/Dockerfile
+!/.dockerignore
 !/*.py
 !/dashboard/
 /dashboard/*
@@ -14,6 +16,13 @@
 !/tests/
 /tests/*
 !/tests/test_*.py
+!/.github/
+!/.github/workflows/
+!/.github/workflows/deploy-oracle.yml
+!/deploy/
+!/deploy/oracle/
+!/deploy/oracle/*.sh
+!/deploy/oracle/*.yml
 # Private configuration and runtime data stay on this Mac.
 .env*
 !/.env.example

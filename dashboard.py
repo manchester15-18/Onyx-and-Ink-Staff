@@ -32,6 +32,10 @@ os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
 os.environ['OTEL_SDK_DISABLED']='true'
 ROOT = Path(__file__).resolve().parent
+CLOUD_MODE = os.environ.get('ONYX_CLOUD_MODE','').lower() in ('1','true','yes')
+PUBLIC_ORIGIN = os.environ.get('ONYX_PUBLIC_ORIGIN','').rstrip('/')
+APP_HOST = os.environ.get('ONYX_BIND_HOST','0.0.0.0' if CLOUD_MODE else '127.0.0.1')
+APP_PORT = int(os.environ.get('PORT','8765'))
 STAFF = [('Morgan','Chief Operating Officer','MORGAN_EMAIL'),('Avery','Marketing Lead','AVERY_EMAIL'),('Jordan','IT & Storefront Development Lead','JORDAN_EMAIL'),('Cameron','Legal & HR Lead','CAMERON_EMAIL')]
 TOKEN = secrets.token_urlsafe(32)
 LOCK = threading.Lock()
@@ -195,7 +199,7 @@ def snapshot():
     return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),'workStatus':work_status,
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),'importantCc':config.get('IMPORTANT_CC_EMAIL',''),
         'signatures':signature_settings(ROOT,addresses,website),
-        'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'James · CEO','email':config.get('OWNER_EMAIL','')},{'name':'Jaunee','label':'Jaunee · Vice President','email':config.get('IMPORTANT_CC_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
+        'wifi':{'enabled':True if CLOUD_MODE else bool(ACCESS.settings().get('enabled')),'url':PUBLIC_ORIGIN if CLOUD_MODE else next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),''),'cloud':CLOUD_MODE},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'James · CEO','email':config.get('OWNER_EMAIL','')},{'name':'Jaunee','label':'Jaunee · Vice President','email':config.get('IMPORTANT_CC_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
 
 def outbox_file(identifier):
@@ -252,6 +256,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path=urlparse(self.path).path
         if not self.allowed():return self.reply(403,{'error':'Local access only.'})
+        if path=='/healthz':return self.reply(200,{'status':'ok'})
         if path=='/app.js' or path=='/style.css':pass
         elif path=='/ca.crt':
             return self.reply(200,(ROOT/'work'/'certificates'/'onyx-dashboard-ca.crt').read_bytes(),'application/x-x509-ca-cert')
@@ -288,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global MONITOR, WORKSPACE_SETUP
         origin=self.headers.get('Origin','')
-        allowed_origin=origin in {'http://127.0.0.1:8765','http://localhost:8765',*('https://'+host for host in ACCESS.hosts() if host.endswith(':8766'))}
+        allowed_origin=origin in {'http://127.0.0.1:8765','http://localhost:8765',*('https://'+host for host in ACCESS.hosts() if host.endswith(':8766'))}|({PUBLIC_ORIGIN} if PUBLIC_ORIGIN else set())
         if self.path=='/api/login' and self.allowed() and allowed_origin:
             try:
                 length=int(self.headers.get('Content-Length','0'))
@@ -498,13 +503,13 @@ class Handler(BaseHTTPRequestHandler):
 if __name__=='__main__':
     if not DESIRED.exists():set_desired(monitor_active())
     threading.Thread(target=supervise,daemon=True).start()
-    print('Onyx and Ink dashboard: http://127.0.0.1:8765')
+    print(f'Onyx and Ink dashboard: http://{APP_HOST}:{APP_PORT}')
     threading.Thread(target=TELEGRAM.run,daemon=True).start()
-    tls=ACCESS.context();lan=None
+    tls=None if CLOUD_MODE else ACCESS.context();lan=None
     if tls:
         lan=ThreadingHTTPServer(('0.0.0.0',8766),Handler);lan.socket=tls.wrap_socket(lan.socket,server_side=True)
         threading.Thread(target=lan.serve_forever,daemon=True).start()
-    server=ThreadingHTTPServer(('127.0.0.1',8765),Handler)
+    server=ThreadingHTTPServer((APP_HOST,APP_PORT),Handler)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:

@@ -1,0 +1,34 @@
+name: Deploy to Oracle Cloud
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oracle-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ vars.ORACLE_DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Configure restricted SSH access
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ORACLE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/oracle
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/oracle ~/.ssh/known_hosts
+      - name: Deploy verified main branch
+        env:
+          ORACLE_HOST: ${{ secrets.ORACLE_HOST }}
+          ORACLE_USER: ${{ secrets.ORACLE_USER }}
+        run: ssh -i ~/.ssh/oracle -o IdentitiesOnly=yes "$ORACLE_USER@$ORACLE_HOST" /opt/onyx/app/deploy/oracle/deploy.sh

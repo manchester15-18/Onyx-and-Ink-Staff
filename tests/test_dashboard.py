@@ -25,6 +25,13 @@ class DashboardTests(unittest.TestCase):
             work=Path(d)/'work';work.mkdir();(work/'workspace-status.json').write_text('{"state":"failed","message":"Sign-in failed."}')
             self.assertEqual(dashboard.workspace_status()['state'],'failed')
 
+    def test_cloud_health_check_is_available_before_dashboard_sign_in(self):
+        handler=dashboard.Handler.__new__(dashboard.Handler);handler.client_address=('127.0.0.1',1);handler.connection=None
+        handler.headers=Message();handler.headers['Host']='127.0.0.1:8765';handler.path='/healthz';handler.reply=Mock()
+        handler.do_GET()
+        self.assertEqual(handler.reply.call_args.args[0],200)
+        self.assertEqual(handler.reply.call_args.args[1],{'status':'ok'})
+
     def test_inbox_query_string_serves_page(self):
         handler=dashboard.Handler.__new__(dashboard.Handler);handler.client_address=('127.0.0.1',1);handler.connection=None
         handler.headers=Message();handler.headers['Host']='127.0.0.1:8765'

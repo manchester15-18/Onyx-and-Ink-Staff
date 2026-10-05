@@ -5,6 +5,10 @@ from unittest.mock import patch
 import github_sync
 
 class BackupTests(unittest.TestCase):
+    def test_expected_oracle_deployment_files_are_allowlisted(self):
+        source=Path(github_sync.__file__).read_text()
+        for name in ('Dockerfile','deploy/oracle/compose.yml','.github/workflows/deploy-oracle.yml'):
+            self.assertIn(repr(name),source)
     def test_secret_blocks_before_fetch_or_push(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.git').mkdir();(root/'.env').write_text('GROQ_API_KEY=private-value-for-test\n');(root/'main.py').write_text('key="private-value-for-test"')

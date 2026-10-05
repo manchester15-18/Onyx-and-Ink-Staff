@@ -91,6 +91,7 @@ function render(){
   const tvTest=S.integrations?.tavilyTest||{};$('tavilyStatus').textContent=S.integrations?.tavily?(tvTest.state==='connected'?'Connected · live web search verified':'Configured · ready for a live test'):'Enter a Tavily API key to give every agent current web search.';
   $('testTavily').disabled=!S.integrations?.tavily;
   $('wifiUrl').textContent=S.wifi?.enabled?S.wifi.url:'Wi-Fi access has not been enabled.';
+  if(S.wifi?.cloud){$('accessTitle').textContent='Secure cloud access';$('accessCertificate').hidden=true;$('showWifiPassword').hidden=true}else{$('accessTitle').textContent='Wi-Fi access';$('accessCertificate').hidden=false;$('showWifiPassword').hidden=false}
   $('telegramStatus').textContent=S.telegram?.configured?(S.telegram.enabled?'Enabled':'Disabled')+' · '+S.telegram.paired+' paired':'Token needed';
   if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=!!S.telegram?.enabled;
   if($('mailboxSelect').options.length===1){$('mailboxSelect').replaceChildren(...S.mailboxes.map(m=>{const o=el('option','',m.label+(m.email?' — '+m.email:''));o.value=m.name;return o}));const initial=new URLSearchParams(location.search).get('mailbox');if(S.mailboxes.some(m=>m.name===initial))$('mailboxSelect').value=initial;}

@@ -248,3 +248,13 @@ Inbox messages load in pages of 40 with search across loaded messages. Replies a
 Dashboard cleanup hides messages older than 30 days by default. Change this to Never, 7, 30, or 90 days in Settings. Hidden messages remain in Gmail; use the Hidden or All inbox view to find and restore them. Hide/restore/automatic cleanup never archive, mark, or delete Gmail messages. **Delete from Gmail** requires confirmation and moves the selected message to Gmail Trash. Agents can only delete mail in their own inbox after the exact direct command `delete email MESSAGE_ID`; quoted email content and inferred instructions cannot authorize deletion. Permanent Gmail deletion is not implemented.
 
 Nightly backups run at 3 a.m. Eastern using the existing desktop automation. Each source update includes a dated CHANGELOG.md entry; credentials, email, chats, reports, uploads, and certificates remain excluded. Existing human staging and remote conflicts stop the backup for review.
+
+## Oracle Cloud deployment
+
+The production layout uses one Oracle Ampere VM, Docker Compose, persistent host directories under `/opt/onyx/data`, and a Cloudflare Tunnel. The application port stays inside Docker; Cloudflare is the only public entry point. Cloud mode removes the localhost authentication bypass that reverse proxies would otherwise receive and accepts state-changing requests only from `ONYX_PUBLIC_ORIGIN`.
+
+`deploy/oracle/bootstrap.sh` prepares a new Ubuntu VM without copying credentials. Private configuration belongs in `/opt/onyx/secrets/app.env`, the Cloudflare tunnel token in `/opt/onyx/secrets/cloudflared.env`, and the Google Desktop client in `/opt/onyx/secrets/google-oauth-client.json`. Copy `work/google-mail-token.json`, `work/google-workspace-token.json`, `work/wifi-access.json`, and required runtime databases through an encrypted SSH connection; never commit them. Reports live under `/opt/onyx/data/reports`.
+
+Set `ONYX_PUBLIC_ORIGIN` to the final HTTPS dashboard URL. For a new password verifier, temporarily set `DASHBOARD_PASSWORD` in `app.env`, start the dashboard once, confirm sign-in, remove that line, and restart. The saved runtime file contains only a salted verifier. Cloudflare Access should permit only approved leadership addresses.
+
+The GitHub workflow is intentionally disabled until repository variable `ORACLE_DEPLOY_ENABLED=true` and the four production secrets `ORACLE_HOST`, `ORACLE_USER`, `ORACLE_SSH_PRIVATE_KEY`, and `ORACLE_SSH_KNOWN_HOSTS` exist. Each enabled deployment fetches `main` with a fast-forward-only merge, builds the container, runs the full test suite in the built image, and replaces the running services only after tests pass. Runtime data and secrets remain outside the Git checkout.

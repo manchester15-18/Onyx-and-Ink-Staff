@@ -391,3 +391,25 @@
 - Updated tests/test_groq_integration.py (`tests/test_groq_integration.py`).
 
 <!-- backup 0457dea876f79efd34498eab024002200af977cd0f88b02e9ca82dac09cbe10f -->
+
+## 2026-10-05 19:23 EDT — Application update
+
+- Updated the container privacy boundary (`.dockerignore`).
+- Updated .env.example (`.env.example`).
+- Updated automatic Oracle deployment (`.github/workflows/deploy-oracle.yml`).
+- Updated .gitignore (`.gitignore`).
+- Updated the production container definition (`Dockerfile`).
+- Updated README.md (`README.md`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard_access.py (`dashboard_access.py`).
+- Updated Oracle host preparation (`deploy/oracle/bootstrap.sh`).
+- Updated cloud services and persistent storage (`deploy/oracle/compose.yml`).
+- Updated verified Oracle releases (`deploy/oracle/deploy.sh`).
+- Updated GitHub backup and changelog safeguards (`github_sync.py`).
+- Updated tests/test_agent_chat_access.py (`tests/test_agent_chat_access.py`).
+- Updated tests/test_dashboard.py (`tests/test_dashboard.py`).
+- Updated tests/test_github_sync.py (`tests/test_github_sync.py`).
+
+<!-- backup c26049573484a9463457f11ed001275cd519b7096fa365c08e787f7428bcde31 -->

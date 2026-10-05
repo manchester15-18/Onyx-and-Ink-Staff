@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+from unittest.mock import patch
 from email.message import Message
 from agent_chat import AgentChat, TelegramBridge
 from dashboard_access import Access, setup
@@ -80,6 +81,17 @@ class ChatAccessTests(unittest.TestCase):
             self.assertFalse(access.authenticated(handler))
             setup(root,['10.0.0.22']);self.assertEqual((root/'work/wifi-password.txt').read_text().strip(),password)
             self.assertIsNotNone(access.context())
+    def test_cloud_proxy_never_receives_localhost_auth_bypass(self):
+        with tempfile.TemporaryDirectory() as folder,patch.dict('os.environ',{'ONYX_CLOUD_MODE':'true','ONYX_PUBLIC_ORIGIN':'https://staff.example.com','DASHBOARD_PASSWORD':'cloud-test-password'},clear=False):
+            root=Path(folder);access=Access(root)
+            handler=SimpleNamespace(client_address=('127.0.0.1',1),connection=None,headers=Message())
+            self.assertFalse(access.authenticated(handler))
+            self.assertIn('staff.example.com',access.hosts())
+            token=access.login('cloud-test-password','127.0.0.1');self.assertTrue(token)
+            handler.headers['Cookie']='onyx_session='+token
+            self.assertTrue(access.authenticated(handler))
+            saved=(root/'work/wifi-access.json').read_text()
+            self.assertNotIn('cloud-test-password',saved)
     def test_telegram_pair_code_is_temporary_and_state_defaults_disabled(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);bridge=TelegramBridge(root,AgentChat(root),threading.Event())
