@@ -217,3 +217,17 @@
 - Updated tests/test_report_format.py (`tests/test_report_format.py`).
 
 <!-- backup 1f85d3211c04966545d7e070d17b0acdd482f9d09f00769a0c4181163bc2f8af -->
+
+## 2026-10-05 13:18 EDT — Application update
+
+- Updated README.md (`README.md`).
+- Updated dashboard.py (`dashboard.py`).
+- Updated dashboard interactions and controls (`dashboard/app.js`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard/login.html (`dashboard/login.html`).
+- Updated main.py (`main.py`).
+- Updated staff_autonomy.py (`staff_autonomy.py`).
+- Updated tests/test_dashboard.py (`tests/test_dashboard.py`).
+- Updated tests/test_staff_autonomy.py (`tests/test_staff_autonomy.py`).
+
+<!-- backup f81ad133e06bb3c0bf224f31d6dae91350a8c8631f13065eb7dea13c2de43e59 -->

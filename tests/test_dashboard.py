@@ -50,17 +50,17 @@ class DashboardTests(unittest.TestCase):
         handler.do_POST()
         self.assertEqual(handler.reply.call_args.args[0],403)
 
-    def test_mode_change_blocked_while_existing_monitor_runs(self):
+    def test_mode_change_restarts_existing_monitor(self):
         handler=dashboard.Handler.__new__(dashboard.Handler);handler.client_address=('127.0.0.1',12345);handler.connection=None
         handler.headers=Message()
         for key,value in {'Host':'127.0.0.1:8765','Origin':'http://127.0.0.1:8765','X-Dashboard-Token':dashboard.TOKEN,'Content-Length':'16'}.items():handler.headers[key]=value
         body=b'{"mode": "send"}'
         handler.headers.replace_header('Content-Length',str(len(body)))
         handler.rfile=io.BytesIO(body);handler.path='/api/mode';handler.reply=Mock()
-        with patch.object(dashboard,'monitor_active',return_value=True),patch.object(dashboard,'set_key') as update:
+        with patch.object(dashboard,'monitor_active',return_value=True),patch.object(dashboard,'desired',return_value=True),patch.object(dashboard,'stop_monitor') as stop,patch.object(dashboard,'start_monitor') as start,patch.object(dashboard,'set_desired') as set_desired,patch.object(dashboard,'set_key') as update:
             handler.do_POST()
-            self.assertEqual(handler.reply.call_args.args[0],409)
-            update.assert_not_called()
+            self.assertEqual(handler.reply.call_args.args[0],200)
+            update.assert_called_once();stop.assert_called_once();start.assert_called_once();set_desired.assert_called_once_with(True)
 
     def test_manual_reply_retry_is_not_sent_twice(self):
         import json

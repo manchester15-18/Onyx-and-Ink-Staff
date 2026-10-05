@@ -1,5 +1,6 @@
 """Run the Onyx and Ink staff on Groq. Configuration lives in .env."""
 import argparse
+import fcntl
 import os
 from pathlib import Path
 
@@ -98,6 +99,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     rules = (
         "Use one JSON object matching the schema per tool call; never a top-level array. "
         "Keep tool calls and reports concise. Distinguish facts, sample inventory, assumptions, and recommendations. "
+        "Never invent numeric targets, budgets, deadlines, capacity, conversion rates, revenue, inventory, or performance results. Use a number only when it comes from the CEO directive, the sample inventory tool, or a cited current source. Otherwise say the value is unknown or label it 'Proposed target — CEO approval required.' "
         "Cite URLs for researched claims. Never invent search results or claim changes were deployed. "
         "Always return a visible CrewAI Thought/Action instruction or Final Answer; never return reasoning-only output. "
         "If web search reports unavailable, do not retry it; continue with clearly labeled assumptions."
@@ -120,7 +122,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
     research = "Use web search for current claims." if search_key else "Web search is unavailable; clearly label market ideas as assumptions and list research needed."
     def task(agent, description, filename, context=None):
         return Task(
-            description="CEO directive: {directive}\n\n" + description + " Keep the report under 220 words. Return only the finished Markdown report. Never include thoughts, reasoning, tool narration, 'Final Answer', or code fences.",
+            description="CEO directive: {directive}\n\n" + description + " Keep the report under 220 words. Do not invent numerical targets or operational facts; unsupported numbers must be omitted or labeled 'Proposed target — CEO approval required.' Return only the finished Markdown report. Never include thoughts, reasoning, tool narration, 'Final Answer', or code fences.",
             expected_output="A complete, concise Markdown report with actions, assumptions, and open decisions; no reasoning transcript or code fence.",
             agent=agent,
             context=context or [],
@@ -146,7 +148,14 @@ def main(argv=None):
     load_dotenv(PROJECT_DIR / ".env")
     llm = None
     mail = None
+    run_lock = None
     try:
+        if not args.check:
+            lock_path=PROJECT_DIR/'work'/'staff-run.lock';lock_path.parent.mkdir(exist_ok=True);run_lock=lock_path.open('a')
+            try:fcntl.flock(run_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError:
+                print('Another staff run is already active. Wait for it to finish or stop autonomous staff in Settings.')
+                return 1
         mail = StaffMail.from_env(PROJECT_DIR)
         key = credential("GROQ_API_KEY")
         search_key = credential("TAVILY_API_KEY", required=False)
@@ -194,6 +203,8 @@ def main(argv=None):
     finally:
         if llm:
             llm.close()
+        if run_lock:
+            fcntl.flock(run_lock,fcntl.LOCK_UN);run_lock.close()
 
 
 if __name__ == "__main__":

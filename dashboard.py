@@ -23,6 +23,7 @@ from staff_email import StaffMail,signature_settings,save_signature_settings,res
 from report_format import normalize_report
 from delivery_tracking import check_delivery
 from inbox_state import InboxState
+from staff_autonomy import StaffAutonomy
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -42,6 +43,7 @@ from agent_actions import Actions
 ACCESS = Access(ROOT)
 CHAT = AgentChat(ROOT)
 TELEGRAM = TelegramBridge(ROOT,CHAT,STOP)
+AUTONOMY = StaffAutonomy(ROOT)
 
 
 def provider_status(name):
@@ -113,6 +115,8 @@ def supervise():
             if desired():
                 try:start_monitor()
                 except (ValueError,OSError):pass
+            try:AUTONOMY.tick()
+            except (ValueError,OSError):pass
 
 
 def stop_monitor():
@@ -165,7 +169,7 @@ def snapshot():
         if item['kind']=='report':
             reports.append({'name':item['name'],'agent':item['agent'],'body':clean(normalize_report(tools.file(item['file_id']).read_text()[:50000]))})
     addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')
-    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),
+    return {'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),'importantCc':config.get('IMPORTANT_CC_EMAIL',''),
         'signatures':signature_settings(ROOT,addresses,website),
         'wifi':{'enabled':bool(ACCESS.settings().get('enabled')),'url':next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),'')},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{}))},'activity':activity,'processed':processed,'reports':reports,'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'CEO','email':config.get('OWNER_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
@@ -322,8 +326,18 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.path=='/api/telegram-pair':return self.reply(200,{'code':TELEGRAM.pairing()})
                 elif self.path=='/api/mode':
                     if data.get('mode') not in ('off','draft','send'):raise ValueError()
-                    if monitor_active():return self.reply(409,{'error':'Stop the monitor before changing email mode. A running monitor retains its old settings.'})
+                    restart=monitor_active() or desired()
+                    if monitor_active():stop_monitor()
                     set_key(str(ROOT/'.env'),'STAFF_EMAIL_MODE',data['mode'],quote_mode='never')
+                    if restart and data['mode']!='off':start_monitor();set_desired(True)
+                    elif data['mode']=='off':set_desired(False)
+                    return self.reply(200,{'message':'Email mode saved. The inbox monitor was restarted with the new setting.' if restart and data['mode']!='off' else 'Email mode saved.'})
+                elif self.path=='/api/autonomy':
+                    try:state=AUTONOMY.configure(data)
+                    except ValueError as error:return self.reply(400,{'error':str(error)})
+                    if not state['enabled']:AUTONOMY.stop()
+                    else:AUTONOMY.tick()
+                    return self.reply(200,{'message':'Autonomous staff settings saved.'})
                 elif self.path=='/api/start':
                     start_monitor();set_desired(True)
                 elif self.path=='/api/stop':
@@ -415,5 +429,6 @@ if __name__=='__main__':
             MONITOR.send_signal(signal.SIGINT)
             try:MONITOR.wait(timeout=10)
             except subprocess.TimeoutExpired:MONITOR.terminate()
+        if AUTONOMY.process and AUTONOMY.process.poll() is None:AUTONOMY.process.send_signal(signal.SIGINT)
         if lan:lan.shutdown();lan.server_close()
         server.server_close()

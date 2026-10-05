@@ -14,7 +14,7 @@ if($('loginForm')){
 const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach the AI service/;
-let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0,signaturesReady=false;
+let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,pal=0,signaturesReady=false,autonomyReady=false;
 const busy=new Set();let inboxMessages=[],inboxNext=null,inboxVersion=0,readVersion=0,replyAttachments=[],composeAttachments=[],uploading=0;
 
 const isBad=a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted';
@@ -65,7 +65,10 @@ function render(){
   $('google').textContent=S.authorized?'Authorized':'Setup needed';$('monitorLine').textContent=S.monitor?'Running':'Stopped';
   $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
-  $('saveMode').disabled=S.monitor;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
+  $('saveMode').disabled=false;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
+  const au=S.autonomy||{};$('autonomyStatus').textContent=au.running?'Working now':au.enabled?(au.inWindow?'Enabled · waiting for the next cycle':'Enabled · outside scheduled hours'):'Stopped';
+  if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoInterval').value=String(au.interval||60);$('autoObjective').value=au.objective||'';autonomyReady=true}
+  $('stopAutonomy').disabled=!au.enabled&&!au.running;
   const items=attention();$('attnCount').textContent=items.length;
   $('needs').replaceChildren(...(items.length?items.map(([lvl,t,d,go])=>{const n=el('div','nd '+(lvl==='w'?'w':''));n.append(el('b','',t),el('small','',d));
     const b=el('button','','Open');b.onclick=()=>navigate(go);n.append(b);return n}):[el('p','empty','All clear. Nothing needs you.')]));
@@ -246,6 +249,10 @@ const act=async(p,d)=>{try{await api(p,d);toast('Settings updated.');sig='';awai
 on('saveMode','click',async()=>{const mode=$('modeSelect').value;if(mode==='send'&&!await sure('Enable live sending? The running monitor will send agent replies and forward outside emails to the CEO.'))return;act('mode',{mode})});
 on('start','click',async()=>{if(S.mode==='send'&&!await sure('Start the monitor with live email sending enabled?'))return;act('start')});
 on('stop','click',()=>act('stop'));on('close','click',()=>$('detail').close());
+const autonomyData=(runNow=false,enabled=$('autoEnabled').checked)=>({enabled,start:$('autoStart').value,stop:$('autoStop').value,interval:Number($('autoInterval').value),objective:$('autoObjective').value.trim(),runNow});
+on('saveAutonomy','click',async()=>{try{await api('autonomy',autonomyData());autonomyReady=false;toast('Autonomous staff schedule saved.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('runAutonomy','click',async()=>{if(!await sure('Start an autonomous staff cycle now? This uses Groq and may take several minutes.','Run now'))return;try{await api('autonomy',autonomyData(true,true));autonomyReady=false;toast('Autonomous staff cycle started.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('stopAutonomy','click',async()=>{if(!await sure('Stop autonomous staff and disable future scheduled cycles?','Stop staff'))return;try{await api('autonomy',autonomyData(false,false));autonomyReady=false;toast('Autonomous staff stopped.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('showWifiPassword','click',async()=>{try{$('wifiPassword').textContent=(await api('wifi-password',{})).password}catch(e){$('wifiPassword').textContent=e.message}});
 on('saveTelegram','click',async()=>{try{await api('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';sig='';await refresh();toast('Telegram settings saved.')}catch(e){toast(e.message,'bad')}});
 on('pairTelegram','click',async()=>{try{const r=await api('telegram-pair',{});$('telegramPairCode').textContent='In your bot’s private chat, send /pair '+r.code+' within 10 minutes. This grants access to the shared staff conversations.'}catch(e){$('telegramPairCode').textContent=e.message}});
