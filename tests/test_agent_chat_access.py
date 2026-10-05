@@ -19,6 +19,15 @@ class ChatAccessTests(unittest.TestCase):
             action=chat.ask('Morgan','Create a launch report with the next steps.','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
             self.assertEqual(action,'Report saved.');chat.act.assert_called_once()
 
+    def test_coworker_email_uses_tools_with_limited_authority(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
+            chat=AgentChat(root);chat.llm=Mock();chat.act=Mock(return_value='Work completed.')
+            answer=chat.ask('Jordan','Authenticated internal message from Avery. Update the storefront notes.','eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',source='staff_email')
+            self.assertEqual(answer,'Work completed.')
+            self.assertEqual(chat.act.call_args.kwargs['source'],'staff_email')
+            self.assertIn('named Onyx & Ink coworker',chat.act.call_args.args[1][0]['content'])
+
     def test_slow_agent_does_not_block_another_agent_chat(self):
         class ConcurrentLLM:
             def __init__(self):self.active=0;self.maximum=0;self.lock=threading.Lock()

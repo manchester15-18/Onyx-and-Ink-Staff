@@ -17,7 +17,7 @@ from staff_email import StaffMail, STAFF, valid_address
 CATALOG = '''Actions (use exact names and argument keys):
 report {title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]};
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
-design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; workspace_files {};
+design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; staff_reports {name:marketing,storefront,policy,operations,or all}; workspace_files {};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
 search {query}; webpage {url}. Workspace creation/upload is automatic. Email to Owner or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Email Owner only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save locally; document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
 
@@ -128,6 +128,17 @@ class Actions:
             result=mail.deliver(self.agent,['Owner'],subject,self.clean(self.text(a,'body')),kind='reply',reply_address=original['replyTo'],in_reply_to=original['messageId'],references=original.get('references') or None)
             return {'result':result,'approval':'Review reply in Outbox before sending.','url':'/activity'}
         if action=='files':return {'files':self.files()}
+        if action=='staff_reports':
+            name=str(a.get('name','all')).strip().lower()
+            choices={'marketing':'marketing_campaign.md','storefront':'web_dev_specs.md','policy':'legal_terms.md','operations':'operational_plan.md'}
+            if name!='all' and name not in choices:raise ValueError('Choose marketing, storefront, policy, operations, or all.')
+            selected=choices.items() if name=='all' else [(name,choices[name])]
+            reports={}
+            for label,filename in selected:
+                path=self.root/'reports'/filename
+                try:reports[label]=path.read_text()[:5000]
+                except FileNotFoundError:reports[label]='No saved report yet.'
+            return {'dashboard':'/reports','reports':reports}
         if action=='upload':return self.workspace.upload(self.file(a.get('file_id','')),self.file(a.get('file_id','')).name)
         if action=='workspace_files':return self.workspace.list_files()
         if action=='calendar':return self.workspace.calendar()

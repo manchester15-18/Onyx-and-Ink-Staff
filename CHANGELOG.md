@@ -231,3 +231,21 @@
 - Updated tests/test_staff_autonomy.py (`tests/test_staff_autonomy.py`).
 
 <!-- backup f81ad133e06bb3c0bf224f31d6dae91350a8c8631f13065eb7dea13c2de43e59 -->
+
+## 2026-10-05 13:28 EDT — Application update
+
+- Updated README.md (`README.md`).
+- Updated staff action capabilities and authorization checks (`agent_actions.py`).
+- Updated staff chat and Telegram conversations (`agent_chat.py`).
+- Updated dashboard pages and forms (`dashboard/index.html`).
+- Updated dashboard/login.html (`dashboard/login.html`).
+- Updated inbox_monitor.py (`inbox_monitor.py`).
+- Updated main.py (`main.py`).
+- Updated staff_autonomy.py (`staff_autonomy.py`).
+- Updated email preparation, attachments, and sending (`staff_email.py`).
+- Updated tests/test_agent_actions.py (`tests/test_agent_actions.py`).
+- Updated tests/test_agent_chat_access.py (`tests/test_agent_chat_access.py`).
+- Updated tests/test_inbox_monitor.py (`tests/test_inbox_monitor.py`).
+- Updated tests/test_staff_email.py (`tests/test_staff_email.py`).
+
+<!-- backup 7a6f79c91a49fdf4a097fdfc2e36967e38c83056d69754f8be76f7ebb355a52b -->

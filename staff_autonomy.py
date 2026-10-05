@@ -10,7 +10,18 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-DEFAULT_OBJECTIVE='Continue advancing the current Onyx & Ink priorities. Use saved reports as context, make only verifiable progress, and ask the CEO one focused question only when a decision blocks the next useful action.'
+DEFAULT_OBJECTIVE='Continue advancing the current Onyx & Ink priorities. Start the highest-priority unfinished work immediately, make only verifiable progress, and ask the CEO one focused question only when a decision blocks the next useful action.'
+
+
+def report_context(root):
+    """Keep enough prior work for continuity without flooding every model call."""
+    sections=[]
+    for path in sorted((Path(root)/'reports').glob('*.md')):
+        try:text=path.read_text().strip()
+        except OSError:continue
+        if text:
+            sections.append(path.stem.replace('_',' ').title()+':\n'+text[:450])
+    return '\n\n'.join(sections)[:1800]
 
 
 def valid_time(value):
@@ -71,14 +82,13 @@ class StaffAutonomy:
         if not state['enabled'] or (not forced and not in_window(state['start'],state['stop'])) or run_active(self.root):return
         if time.time()-float(state.get('lastFinishedEpoch') or 0)<int(state['interval'])*60:return
         log=self.root/'work'/'autonomous-staff.log';log.parent.mkdir(exist_ok=True)
-        previous=[]
-        for path in sorted((self.root/'reports').glob('*.md')):
-            try:previous.append(path.stem.replace('_',' ').title()+':\n'+path.read_text()[:900])
-            except OSError:pass
-        directive=state['objective']
+        previous=report_context(self.root)
+        directive=(state['objective']+'\n\nStart this work cycle now. This is an execution cycle, not a request to restate the plan. '
+                   'Each department must choose one concrete unfinished action it can complete with its available tools, do that work, and record the result and next owner. '
+                   'Do not wait for another agent or for an email unless a truly blocking decision is required.')
         if previous:
-            directive+='\n\nContinue from this saved staff context. Do not repeat completed work or treat proposed figures as approved facts:\n\n'+'\n\n'.join(previous)
-        directive=directive[:6000]
+            directive+='\n\nUse this compact saved context for continuity. Do not repeat completed work or treat proposed figures as approved facts:\n\n'+previous
+        directive=directive[:4000]
         env=dict(os.environ)
         with log.open('ab') as output:
             self.process=subprocess.Popen([sys.executable,'-u',str(self.root/'main.py'),'--directive',directive],cwd=self.root,stdout=output,stderr=output,env=env)

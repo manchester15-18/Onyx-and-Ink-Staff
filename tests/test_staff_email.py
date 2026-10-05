@@ -39,7 +39,14 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn('avery@example.com',str(msg['From']))
             self.assertIn('jordan@example.com',str(msg['To']))
             self.assertIn('morgan@example.com',str(msg['To']))
-            self.assertIn('Campaign report',msg.get_body(preferencelist=('plain',)).get_content())
+            body=msg.get_body(preferencelist=('plain',)).get_content()
+            self.assertEqual(str(msg['Subject']),'Marketing update and next steps')
+            self.assertIn('Hi Jordan and Morgan',body)
+            self.assertIn('Dashboard → Staff Reports',body)
+            self.assertNotIn('Campaign report',body)
+            self.assertNotIn('task handoff',body.lower())
+            self.assertNotIn('automated staff message',body.lower())
+            self.assertTrue(msg['X-Onyx-Ink-Run-ID'])
             smtp.assert_not_called()
 
     def test_callbacks_do_not_duplicate_and_routine_reports_stay_in_dashboard(self):

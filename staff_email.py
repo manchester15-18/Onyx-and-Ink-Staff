@@ -228,14 +228,13 @@ class StaffMail:
         message['Message-ID'] = make_msgid()
         message['Auto-Submitted'] = 'no' if kind in ('manual', 'compose') else 'auto-replied' if kind == 'reply' else 'auto-generated'
         message['X-Onyx-Ink-Kind'] = kind
+        message['X-Onyx-Ink-Run-ID'] = self.run_id
         message['X-Auto-Response-Suppress'] = 'All'
         if in_reply_to:
             message['In-Reply-To'] = in_reply_to
         if references:
             message['References'] = references
         signature = self.signatures.get(sender,('CEO' if sender == 'Owner' else 'Onyx & Ink Team') + '\nOnyx & Ink')
-        if kind not in ('manual', 'compose'):
-            signature += f'\nAutomated staff message | Run {self.run_id}'
         clean_body=markdown_to_plain(body[:30000])
         message.set_content(clean_body + '\n\n' + signature + '\n')
         signature_html='<br>'.join(html.escape(line) for line in signature.splitlines())
@@ -351,11 +350,17 @@ class StaffMail:
             if self.team_updates and sender != 'Morgan':
                 next_agent = {'Avery': 'Jordan', 'Jordan': 'Cameron', 'Cameron': 'Morgan'}[sender]
                 recipients = list(dict.fromkeys([next_agent, 'Morgan']))
+                subjects = {'Avery':'Marketing update and next steps','Jordan':'Storefront update and next steps','Cameron':'Policy update and next steps'}
+                introductions = {
+                    'Avery':'Hi Jordan and Morgan,\n\nI finished this round of marketing work. The updated Marketing report is ready in Dashboard → Staff Reports. Jordan, please review the product, audience, and offer details there as you continue the storefront work.',
+                    'Jordan':'Hi Cameron and Morgan,\n\nI finished this round of storefront work. The updated Storefront report is ready in Dashboard → Staff Reports. Cameron, please review any customer-facing policy points there that affect the experience.',
+                    'Cameron':'Hi Morgan,\n\nI finished this round of policy work. The updated Policy report is ready in Dashboard → Staff Reports, including any decisions that still need attention.',
+                }
                 try:
-                    print(self.deliver(sender, recipients, f'{sender}: task handoff to {next_agent}',
-                                       f'My task is complete. Use this report as relevant for your assignment.\n\n{output.raw}', kind='handoff'))
+                    print(self.deliver(sender, recipients, subjects[sender],
+                                       introductions[sender], kind='message'))
                 except (ValueError, OSError):
-                    print('Staff handoff could not be prepared; task execution continues.')
+                    print('Staff update could not be prepared; work continues.')
         return callback
 
     def finish(self):
@@ -380,6 +385,8 @@ class StaffMail:
             """Email Owner or named coworkers Morgan, Avery, Jordan, Cameron.
             Use one JSON object with recipients (a list of names), subject, and body.
             Only internal configured recipients are supported. Draft mode saves without sending.
+            Write as a friendly coworker with a natural subject and greeting. Do not use workflow jargon
+            such as task handoff, artifact, or execution cycle. Do not add a sign-off; one is appended.
             """
             if self.tool_count >= 4:
                 return "Agent email-tool limit reached; report delivery slots are reserved."

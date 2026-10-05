@@ -101,6 +101,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
         "Keep tool calls and reports concise. Distinguish facts, sample inventory, assumptions, and recommendations. "
         "Never invent numeric targets, budgets, deadlines, capacity, conversion rates, revenue, inventory, or performance results. Use a number only when it comes from the CEO directive, the sample inventory tool, or a cited current source. Otherwise say the value is unknown or label it 'Proposed target — CEO approval required.' "
         "Cite URLs for researched claims. Never invent search results or claim changes were deployed. "
+        "Start the work immediately. Choose and complete a concrete useful next step with the tools available; do not wait for another agent or an email unless a decision truly blocks progress. "
         "Always return a visible CrewAI Thought/Action instruction or Final Answer; never return reasoning-only output. "
         "If web search reports unavailable, do not retry it; continue with clearly labeled assumptions."
     )
@@ -115,6 +116,7 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
             agent.backstory += (
                 f" Your email address is {mail.addresses[name]}. You may email Owner or named coworkers "
                 "when a specific question, assignment, or decision needs their attention. "
+                "Write internal email like a concise, friendly coworker. Use a natural subject, greeting, and plain language. Never use workflow jargon such as 'task handoff', 'artifact', or 'execution cycle'. "
                 "Internal staff and Owner email sends automatically. Email Owner only for an urgent risk, blocking decision, or one specific answer needed to complete useful work; keep it under 120 words and state the requested response clearly. The inbox monitor will route the authenticated reply back to you for follow-up. "
                 "Routine updates and completion reports stay in the dashboard; do not email them to Owner. "
                 "A separate inbox monitor handles incoming replies. Do not claim to have received a reply unless it is supplied in your task context."
@@ -129,10 +131,10 @@ def build_crew(llm, search_key=None, verbose=False, mail=None):
             # Template interpolation preserves absolute paths in CrewAI 1.6.1.
             output_file="{report_dir}/" + filename,
         )
-    marketing_task = task(marketing, "Check sample blank inventory and propose products, audiences, offers, channels, and campaign measures. " + research, "marketing_campaign.md")
-    web_task = task(web, "Specify live text/image preview, upload validation, accessibility, mobile checkout, and implementation acceptance criteria.", "web_dev_specs.md")
-    legal_task = task(legal, "Draft custom-order approval, returns, defects, IP permissions, and dispute terms. Flag jurisdiction-specific questions. " + research, "legal_terms.md")
-    summary = task(coo, "Combine the three supplied department reports into priorities, owners, dependencies, success measures, and CEO decisions. Preserve uncertainties and sample-data labels.", "operational_plan.md", [marketing_task, web_task, legal_task])
+    marketing_task = task(marketing, "Begin immediately by completing the highest-priority unfinished marketing action supported by the directive. Check sample blank inventory when relevant, then produce or advance concrete products, audiences, offers, channels, or campaign copy. State what you completed and the next owner. " + research, "marketing_campaign.md")
+    web_task = task(web, "Begin immediately by completing the highest-priority unfinished storefront action supported by the directive. Produce or advance concrete implementation requirements for personalization, uploads, accessibility, or mobile checkout. State what you completed and the next owner.", "web_dev_specs.md")
+    legal_task = task(legal, "Begin immediately by completing the highest-priority unfinished policy or HR action supported by the directive. Produce or advance usable custom-order, returns, defects, IP, or dispute language and flag only genuinely blocking jurisdiction questions. State what you completed and the next owner. " + research, "legal_terms.md")
+    summary = task(coo, "Review the three completed department updates. Decide the next executable priorities, assign clear owners, resolve overlaps, and identify only decisions that actually block further work. Preserve uncertainties and sample-data labels.", "operational_plan.md", [marketing_task, web_task, legal_task])
     if mail and mail.mode != "off":
         for name, staff_task in (("Avery", marketing_task), ("Jordan", web_task), ("Cameron", legal_task), ("Morgan", summary)):
             staff_task.callback = mail.report_callback(name)

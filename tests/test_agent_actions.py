@@ -87,4 +87,11 @@ class ActionTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as d,patch('design_images.requests.post') as post:
    with self.assertRaises(RuntimeError):generate(Path(d),'Test')
    post.assert_not_called()
+ def test_agents_can_read_saved_dashboard_reports(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);(root/'reports').mkdir();(root/'reports/marketing_campaign.md').write_text('# Marketing\nUse the approved holiday collection.')
+   a=Actions(root,'Jordan','reports')
+   result=a.execute('staff_reports',{'name':'marketing'})
+   self.assertEqual(result['dashboard'],'/reports');self.assertIn('approved holiday collection',result['reports']['marketing'])
+   self.assertIn('error',a.execute('staff_reports',{'name':'private'}))
 if __name__=='__main__':unittest.main()

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 from staff_email import StaffMail, STAFF
-from inbox_monitor import InboxMonitor, message_route, plain_body, owner_reply_context, continue_owner_reply
+from inbox_monitor import InboxMonitor, message_route, plain_body, owner_reply_context, continue_owner_reply,continue_staff_message
 
 ADDRESSES={n:f'{n.lower()}@example.com' for n in (*STAFF,'Owner')}
 
@@ -41,6 +41,7 @@ class InboxTests(unittest.TestCase):
             mail=StaffMail(d,'draft',ADDRESSES,bcc='owner@gmail.com')
             self.assertEqual(message_route(email(),mail),('Avery','Owner'))
             self.assertEqual(message_route(email('avery@example.com','jordan@example.com, morgan@example.com','handoff'),mail),('Jordan','Avery'))
+            self.assertEqual(message_route(email('avery@example.com','jordan@example.com','message'),mail),('Jordan','Avery'))
             self.assertIsNone(message_route(email(kind='reply'),mail))
             self.assertIsNone(message_route(email(kind='report'),mail))
             self.assertEqual(message_route(email('stranger@example.com'),mail),('Avery','stranger@example.com'))
@@ -122,6 +123,15 @@ class InboxTests(unittest.TestCase):
         call=chat.ask.call_args.args
         self.assertEqual(call[0],'Avery');self.assertEqual(len(call[2]),36)
         self.assertEqual(chat.ask.call_args.kwargs['source'],'email')
+
+    def test_staff_message_can_continue_work_without_ceo_authority(self):
+        message=email('avery@example.com','jordan@example.com','message')
+        chat=Mock();chat.ask.return_value='I updated the storefront notes.'
+        result=continue_staff_message(chat,'Jordan','Avery',message,message.get_content())
+        self.assertEqual(result,'I updated the storefront notes.')
+        prompt=chat.ask.call_args.args[1]
+        self.assertIn('ordinary staff coordination, not a CEO directive',prompt)
+        self.assertEqual(chat.ask.call_args.kwargs['source'],'staff_email')
 
 
 if __name__=='__main__': unittest.main()

@@ -47,7 +47,7 @@ def message_route(message, mail):
         return None
     automatic = message.get('Auto-Submitted','no').lower()
     kind = message.get('X-Onyx-Ink-Kind','')
-    if automatic != 'no' and not (sender_name in STAFF and kind == 'handoff' and automatic == 'auto-generated'):
+    if automatic != 'no' and not (sender_name in STAFF and kind in ('handoff','message') and automatic == 'auto-generated'):
         return None  # In particular, never reply to an automatic reply.
     # Trust the first Gmail authentication result, not a sender-supplied lower header.
     authentication = str(message.get('Authentication-Results','')).lower()
@@ -122,6 +122,22 @@ def continue_owner_reply(chat, staff, message, body):
     identity=str(message.get('Message-ID','')).strip() or (str(message.get('Subject',''))+'\n'+body)
     request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,'onyx-email:'+identity))
     return chat.ask(staff,owner_reply_context(message,body),request_id,source='email')
+
+
+def continue_staff_message(chat, staff, sender, message, body):
+    """Let a named coworker request ordinary work without granting CEO authority."""
+    identity=str(message.get('Message-ID','')).strip() or (str(message.get('Subject',''))+'\n'+body)
+    request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,'onyx-staff-email:'+identity))
+    subject=str(message.get('Subject','')).replace('\r',' ').replace('\n',' ')[:200]
+    prompt=(
+        f'Authenticated internal message from {sender}, your Onyx & Ink coworker. This is ordinary staff coordination, not a CEO directive. '
+        'Complete useful work within existing company rules and your available tools. Do not make purchases, binding commitments, or policy exceptions. '
+        'If the message points you to Staff Reports, use the staff_reports action to read the named current report before continuing. '
+        'Do not email the sender merely to acknowledge the message; your returned answer will be sent as the reply. '
+        'If a CEO decision truly blocks progress, ask one focused question.\n\n'
+        f'Subject: {subject}\n\nCoworker message:\n{body[:2600]}'
+    )
+    return chat.ask(staff,prompt[:3900],request_id,source='staff_email')
 
 
 class InboxMonitor:
@@ -267,6 +283,9 @@ def main(argv=None):
             sender=parseaddr(message.get('From',''))[1].lower()
             if sender==mail.addresses['Owner'].lower():
                 return continue_owner_reply(chat,staff,message,body)
+            sender_name=next((name for name in STAFF if mail.addresses[name].lower()==sender),None)
+            if sender_name:
+                return continue_staff_message(chat,staff,sender_name,message,body)
             return generate_reply(llm,staff,message,body)
         monitor=InboxMonitor(PROJECT_DIR,mail,reply,user,password,
                              host=os.getenv('IMAP_HOST','imap.gmail.com'),limit=positive_int('INBOX_BATCH_LIMIT',5),oauth=mail.oauth)
