@@ -430,3 +430,10 @@
 - Updated tests/test_github_sync.py (`tests/test_github_sync.py`).
 
 <!-- backup 346087f6c4e22beab2f2dad32a21d79d7658ef8b93a3cee76131def8c063fa15 -->
+
+## 2026-10-05 22:07 EDT — Application update
+
+- Updated Windows dashboard startup (`deploy/windows/start.ps1`).
+- Updated tests/test_github_sync.py (`tests/test_github_sync.py`).
+
+<!-- backup d670049600139c721605a7e468d0d3a663adf1ab348c676882f7aed978abd5bb -->
