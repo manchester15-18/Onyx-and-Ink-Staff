@@ -23,6 +23,11 @@
 !/deploy/oracle/
 !/deploy/oracle/*.sh
 !/deploy/oracle/*.yml
+!/deploy/windows/
+!/deploy/windows/*.md
+!/deploy/windows/*.ps1
+!/deploy/windows/*.sh
+!/deploy/windows/*.yml
 # Private configuration and runtime data stay on this Mac.
 .env*
 !/.env.example

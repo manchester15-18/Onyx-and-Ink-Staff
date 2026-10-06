@@ -92,6 +92,13 @@ class ChatAccessTests(unittest.TestCase):
             self.assertTrue(access.authenticated(handler))
             saved=(root/'work/wifi-access.json').read_text()
             self.assertNotIn('cloud-test-password',saved)
+    def test_windows_login_mode_requires_a_session_even_behind_local_docker(self):
+        with tempfile.TemporaryDirectory() as folder,patch.dict('os.environ',{'ONYX_CLOUD_MODE':'false','ONYX_REQUIRE_LOGIN':'true','ONYX_ALLOWED_HOSTS':'192.168.1.40:8765','DASHBOARD_PASSWORD':'windows-test-password'},clear=False):
+            root=Path(folder);access=Access(root)
+            handler=SimpleNamespace(client_address=('127.0.0.1',1),connection=None,headers=Message())
+            self.assertFalse(access.authenticated(handler))
+            self.assertIn('192.168.1.40:8765',access.hosts())
+            self.assertTrue(access.login('windows-test-password','127.0.0.1'))
     def test_telegram_pair_code_is_temporary_and_state_defaults_disabled(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);bridge=TelegramBridge(root,AgentChat(root),threading.Event())

@@ -413,3 +413,20 @@
 - Updated tests/test_github_sync.py (`tests/test_github_sync.py`).
 
 <!-- backup c26049573484a9463457f11ed001275cd519b7096fa365c08e787f7428bcde31 -->
+
+## 2026-10-05 20:37 EDT — Application update
+
+- Updated .env.example (`.env.example`).
+- Updated .gitignore (`.gitignore`).
+- Updated dashboard_access.py (`dashboard_access.py`).
+- Updated the Windows migration guide (`deploy/windows/README.md`).
+- Updated the Windows Docker deployment (`deploy/windows/compose.yml`).
+- Updated encrypted private-data export guidance (`deploy/windows/export-private-data.sh`).
+- Updated Windows private-data import (`deploy/windows/import-private-data.ps1`).
+- Updated Windows dashboard startup (`deploy/windows/start.ps1`).
+- Updated Windows dashboard shutdown (`deploy/windows/stop.ps1`).
+- Updated GitHub backup and changelog safeguards (`github_sync.py`).
+- Updated tests/test_agent_chat_access.py (`tests/test_agent_chat_access.py`).
+- Updated tests/test_github_sync.py (`tests/test_github_sync.py`).
+
+<!-- backup 346087f6c4e22beab2f2dad32a21d79d7658ef8b93a3cee76131def8c063fa15 -->

@@ -39,6 +39,12 @@ def update_changelog(changed,base_ref='uncommitted'):
         'deploy/oracle/bootstrap.sh':'Updated Oracle host preparation',
         'deploy/oracle/deploy.sh':'Updated verified Oracle releases',
         'deploy/oracle/compose.yml':'Updated cloud services and persistent storage',
+        'deploy/windows/compose.yml':'Updated the Windows Docker deployment',
+        'deploy/windows/start.ps1':'Updated Windows dashboard startup',
+        'deploy/windows/stop.ps1':'Updated Windows dashboard shutdown',
+        'deploy/windows/export-private-data.sh':'Updated encrypted private-data export guidance',
+        'deploy/windows/import-private-data.ps1':'Updated Windows private-data import',
+        'deploy/windows/README.md':'Updated the Windows migration guide',
     }
     lines=[descriptions.get(name,'Updated '+name) for name in changed]
     entry='\n## '+when+' — Application update\n\n'+'\n'.join('- '+line+' (`'+name+'`).' for line,name in zip(lines,changed))+'\n\n'+marker+'\n'
@@ -57,7 +63,7 @@ def sync():
     allowed=[]
     for name in sorted(files):
         path=ROOT/name
-        deployment={'.dockerignore','Dockerfile','.github/workflows/deploy-oracle.yml','deploy/oracle/bootstrap.sh','deploy/oracle/deploy.sh','deploy/oracle/compose.yml'}
+        deployment={'.dockerignore','Dockerfile','.github/workflows/deploy-oracle.yml','deploy/oracle/bootstrap.sh','deploy/oracle/deploy.sh','deploy/oracle/compose.yml','deploy/windows/compose.yml','deploy/windows/start.ps1','deploy/windows/stop.ps1','deploy/windows/export-private-data.sh','deploy/windows/import-private-data.ps1','deploy/windows/README.md'}
         safe=(name in ('.gitignore','.env.example','README.md','requirements.txt','CHANGELOG.md') or name in deployment or '/' not in name and name.endswith('.py') or name.startswith('tests/test_') and name.endswith('.py') or name.startswith('dashboard/') and name.count('/')==1 and path.suffix in ('.html','.css','.js'))
         if not safe or path.is_symlink():raise RuntimeError('An unexpected tracked file needs review; nothing uploaded.')
         if path.exists():

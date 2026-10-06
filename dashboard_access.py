@@ -16,21 +16,23 @@ class Access:
     def __init__(self,root):
         self.root=Path(root);self.path=self.root/'work'/'wifi-access.json';self.sessions={};self.failures={}
         self.cloud_mode=os.environ.get('ONYX_CLOUD_MODE','').lower() in ('1','true','yes')
+        self.require_login=self.cloud_mode or os.environ.get('ONYX_REQUIRE_LOGIN','').lower() in ('1','true','yes')
         self._provision_cloud_password()
     def _provision_cloud_password(self):
         """Create the persistent password verifier once; never store the password in runtime state."""
         password=os.environ.get('DASHBOARD_PASSWORD','')
-        if not self.cloud_mode or self.path.exists() or not password:return
+        if not self.require_login or self.path.exists() or not password:return
         self.path.parent.mkdir(parents=True,exist_ok=True);salt=secrets.token_bytes(16)
         public=urlparse(os.environ.get('ONYX_PUBLIC_ORIGIN',''))
-        hosts=[value for value in ('localhost','127.0.0.1',public.hostname) if value]
+        configured=[value.strip() for value in os.environ.get('ONYX_ALLOWED_HOSTS','').split(',') if value.strip()]
+        hosts=[value for value in ('localhost','127.0.0.1',public.hostname,*configured) if value]
         cfg={'enabled':False,'hosts':hosts,'salt':salt.hex(),'hash':hashlib.pbkdf2_hmac('sha256',password.encode(),salt,300000).hex()}
         temporary=self.path.with_suffix('.tmp');temporary.write_text(json.dumps(cfg));temporary.chmod(0o600);temporary.replace(self.path)
     def settings(self):
         try:return json.loads(self.path.read_text())
         except (OSError,ValueError):return {}
     def authenticated(self,handler):
-        if not self.cloud_mode and handler.client_address[0] in ('127.0.0.1','::1') and not isinstance(handler.connection,ssl.SSLSocket):return True
+        if not self.require_login and handler.client_address[0] in ('127.0.0.1','::1') and not isinstance(handler.connection,ssl.SSLSocket):return True
         cookie=SimpleCookie()
         try:cookie.load(handler.headers.get('Cookie',''));value=cookie.get('onyx_session')
         except Exception:return False
@@ -46,7 +48,8 @@ class Access:
     def hosts(self):
         public=urlparse(os.environ.get('ONYX_PUBLIC_ORIGIN',''))
         cloud={public.netloc} if public.netloc else set()
-        return {'127.0.0.1:8765','localhost:8765','127.0.0.1:8766','localhost:8766',*cloud,*[host+':8766' for host in self.settings().get('hosts',[])]}
+        configured={value.strip() for value in os.environ.get('ONYX_ALLOWED_HOSTS','').split(',') if value.strip()}
+        return {'127.0.0.1:8765','localhost:8765','127.0.0.1:8766','localhost:8766',*cloud,*configured,*[host+':8766' for host in self.settings().get('hosts',[])]}
     def context(self):
         cfg=self.settings()
         if not cfg.get('enabled'):return None
