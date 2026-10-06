@@ -293,14 +293,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         global MONITOR, WORKSPACE_SETUP
         origin=self.headers.get('Origin','')
-        allowed_origin=origin in {'http://127.0.0.1:8765','http://localhost:8765',*('https://'+host for host in ACCESS.hosts() if host.endswith(':8766'))}|({PUBLIC_ORIGIN} if PUBLIC_ORIGIN else set())
+        allowed_origin=origin in {
+            *('http://'+host for host in ACCESS.hosts()),
+            *('https://'+host for host in ACCESS.hosts()),
+        } | ({PUBLIC_ORIGIN} if PUBLIC_ORIGIN else set())
         if self.path=='/api/login' and self.allowed() and allowed_origin:
             try:
                 length=int(self.headers.get('Content-Length','0'))
                 if length<0 or length>2048:raise ValueError()
                 data=json.loads(self.rfile.read(length));session=ACCESS.login(str(data.get('password','')),self.client_address[0])
                 if not session:return self.reply(401,{'error':'Incorrect password or too many attempts. Try again later.'})
-                self.send_response(200);self.send_header('Set-Cookie','onyx_session='+session+'; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200');self.send_header('Content-Type','application/json');self.send_header('Content-Length','11');self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(b'{"ok":true}');return
+                secure='; Secure' if isinstance(self.connection,ssl.SSLSocket) or CLOUD_MODE else ''
+                self.send_response(200);self.send_header('Set-Cookie','onyx_session='+session+'; Path=/; HttpOnly'+secure+'; SameSite=Strict; Max-Age=43200');self.send_header('Content-Type','application/json');self.send_header('Content-Length','11');self.send_header('Cache-Control','no-store');self.end_headers();self.wfile.write(b'{"ok":true}');return
             except Exception:return self.reply(400,{'error':'Invalid login.'})
         if not self.allowed() or not allowed_origin or self.headers.get('X-Dashboard-Token')!=TOKEN or not ACCESS.authenticated(self):
             return self.reply(403,{'error':'Local dashboard authorization required.'})

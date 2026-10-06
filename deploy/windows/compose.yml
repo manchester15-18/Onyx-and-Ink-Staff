@@ -12,6 +12,7 @@ services:
       PORT: "8765"
     ports:
       - "8765:8765"
+      - "8766:8766"
     volumes:
       - ../../.env:/app/.env
       - ../../google-oauth-client.json:/app/google-oauth-client.json:ro
