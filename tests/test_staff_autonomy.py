@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock,patch
 from staff_autonomy import StaffAutonomy,in_window
+from report_projects import ensure_project, save_project_overview
 
 
 class StaffAutonomyTests(unittest.TestCase):
@@ -26,7 +27,8 @@ class StaffAutonomyTests(unittest.TestCase):
 
     def test_run_now_uses_saved_reports_without_overlapping(self):
         with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);path=root/'reports'/'holiday-launch';path.mkdir(parents=True);(path/'operational_plan.md').write_text('# Existing plan\nCompleted: research')
+            root=Path(folder);_,_,path=ensure_project(root,'holiday-launch','Holiday Launch',activate=True);(path/'operational_plan.md').write_text('# Existing plan\nCompleted: research')
+            save_project_overview(root,'holiday-launch','# Holiday Launch\n\n## Background\nA prepared holiday offer needs coordinated launch work.\n\n## Goals\n- Publish approved launch materials.\n\n## Desired outcomes\n- A ready customer experience with clear ownership.')
             manager=StaffAutonomy(root);manager.configure({'enabled':True,'start':'23:00','stop':'23:30','objective':'Continue approved work.','runNow':True})
             process=Mock();process.poll.return_value=None
             with patch('staff_autonomy.subprocess.Popen',return_value=process) as launch:
@@ -44,6 +46,18 @@ class StaffAutonomyTests(unittest.TestCase):
             with patch('staff_autonomy.subprocess.Popen') as launch:manager.tick()
             self.assertFalse(launch.called)
             self.assertGreaterEqual(manager.load()['capacityReadyEpoch'],ready-1)
+
+    def test_failed_run_marks_agents_waiting_and_records_backoff(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);manager=StaffAutonomy(root)
+            manager.configure({'enabled':True,'start':'','stop':'','objective':'Continue approved work without idle time.'})
+            process=Mock(returncode=1);process.poll.return_value=1;manager.process=process
+            with patch('staff_autonomy.subprocess.Popen'):
+                manager.tick()
+            state=manager.load();status=json.loads((root/'work'/'staff-work-status.json').read_text())
+            self.assertEqual(state['consecutiveFailures'],1)
+            self.assertIn('retrying automatically',state['lastFailure'])
+            self.assertEqual(status['agents']['Morgan'],'waiting')
 
 
 if __name__=='__main__':unittest.main()

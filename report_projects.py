@@ -4,9 +4,27 @@ import re
 import shutil
 import uuid
 from pathlib import Path
+from report_format import normalize_report
 
 DEFAULT_PROJECT = "custom-gift-push"
 DEFAULT_LABEL = "Custom Gift Push"
+OVERVIEW_FILE = 'overview.md'
+
+def _overview_template(label):
+    return f'''# {label} — Project Overview
+
+## Background
+Add the business context, customer need, and relevant constraints.
+
+## Goals
+- Add the outcomes this project must achieve.
+
+## Desired outcomes
+- Define what completed, acceptable work looks like.
+
+## Scope and decisions
+Record approved decisions, owners, and important exclusions.
+'''
 
 
 def project_slug(value):
@@ -40,7 +58,9 @@ def _load(root):
 def _save(root, state):
     path = _state_path(root)
     path.parent.mkdir(exist_ok=True)
-    temporary = path.with_suffix(".tmp")
+    # The dashboard and an autonomous run may touch project metadata together.
+    # A unique replacement file prevents one writer from deleting another's temp file.
+    temporary = path.with_suffix('.'+uuid.uuid4().hex+'.tmp')
     temporary.write_text(json.dumps(state, indent=2) + "\n")
     temporary.chmod(0o600)
     temporary.replace(path)
@@ -55,8 +75,36 @@ def ensure_project(root, name=None, label=None, activate=False):
         state["active"] = slug
     folder = Path(root) / "reports" / slug
     folder.mkdir(parents=True, exist_ok=True)
+    overview=folder/OVERVIEW_FILE
+    if not overview.exists():_write_report(overview,_overview_template(display))
     _save(root, state)
     return slug, display, folder
+
+
+def project_overview(root, project=None):
+    slug,label,folder=ensure_project(root,project)
+    path=folder/OVERVIEW_FILE
+    try:body=path.read_text(encoding='utf-8')
+    except OSError:body=_overview_template(label);_write_report(path,body)
+    return {'project':slug,'project_name':label,'body':body[:20000]}
+
+
+def save_project_overview(root, project, body):
+    slug,label,folder=ensure_project(root,project)
+    body=str(body or '').strip()
+    if not body or len(body)>20000:raise ValueError('Enter project background, goals, and desired outcomes within 20,000 characters.')
+    if not re.search(r'(?m)^#\s+',body):body='# '+label+' — Project Overview\n\n'+body
+    _write_report(folder/OVERVIEW_FILE,body)
+    return {'project':slug,'project_name':label,'body':body}
+
+
+def project_context(root, project=None, limit=6000):
+    """Stable, bounded briefing injected into fresh conversations and tool results."""
+    overview=project_overview(root,project);folder=Path(root)/'reports'/overview['project']
+    sections=['Active project: '+overview['project_name'],overview['body'][:3000]]
+    for path in sorted((folder/'agent-reports').glob('*.md')) if (folder/'agent-reports').exists() else []:
+        sections.append(path.stem.replace('-',' ').title()+':\n'+path.read_text(encoding='utf-8')[:900])
+    return '\n\n'.join(sections)[:limit]
 
 
 def active_project(root):
@@ -77,21 +125,86 @@ def projects(root):
     ]
 
 
+def _write_report(path, body):
+    path.parent.mkdir(parents=True,exist_ok=True)
+    temporary=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');temporary.write_text(body.rstrip()+'\n');temporary.chmod(0o600);temporary.replace(path)
+
+
 def create_report(root,project,agent,title,body):
+    """Create or update the same named manual report for an agent and project."""
     if agent not in ('Morgan','Avery','Jordan','Cameron'):
         raise ValueError('Choose Morgan, Avery, Jordan, or Cameron.')
     title=str(title or '').strip();body=str(body or '').strip()
     if not title or len(title)>160 or not body or len(body)>50000:
         raise ValueError('Enter a title and report body within the allowed length.')
     slug,label,folder=ensure_project(root,project)
-    destination=folder/'manual'/agent.lower();destination.mkdir(parents=True,exist_ok=True)
-    path=destination/(project_slug(title)+'-'+uuid.uuid4().hex[:8]+'.md')
+    path=folder/'manual'/agent.lower()/(project_slug(title)+'.md')
     if not re.search(r'(?m)^#\s+',body):body='# '+title+'\n\n'+body
-    path.write_text(body+'\n');path.chmod(0o600)
-    from report_records import auto_export_reference
-    auto_export_reference(root,path)
-    return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label}
+    existed=path.exists();_write_report(path,body)
+    return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label,'updated':existed}
 
+
+def agent_assignment_path(root,project,filename):
+    slug,label,folder=ensure_project(root,project)
+    if filename not in ('morgan-operations.md','avery-marketing.md','jordan-web-it.md','cameron-hr-legal.md'):raise ValueError('Unknown agent report.')
+    return slug,label,folder/'agent-reports'/filename
+
+
+def consolidated_project_report(root,project=None):
+    """Write one current project briefing from the overview and role reports."""
+    slug,label,folder=ensure_project(root,project)
+    overview=normalize_report(project_overview(root,slug)['body'])
+    overview=re.sub(r'(?m)^#\s+.*\n*','',overview,1).strip()
+    sections=['# '+label+' \u2014 Consolidated Project Report','','## Project overview','',overview]
+    labels={'morgan-operations.md':'Morgan · Operations','avery-marketing.md':'Avery · Marketing','jordan-web-it.md':'Jordan · Web / IT','cameron-hr-legal.md':'Cameron · HR / Legal'}
+    for filename,role in labels.items():
+        path=folder/'agent-reports'/filename
+        if path.exists():
+            body=normalize_report(path.read_text(encoding='utf-8'))
+            body=re.sub(r'(?m)^#\s+.*\n*','',body,1).strip()
+            sections.extend(['','## '+role,'',body or 'No current update saved.'])
+    target=folder/'consolidated-project-report.md';existing=target.exists()
+    _write_report(target,'\n'.join(sections))
+    return {'project':slug,'project_name':label,'id':str(target.relative_to(Path(root)/'reports')),'updated':existing,'path':target}
+
+
+def clean_previous_reports(root, project=None):
+    """Remove known model residue from historic report files, retaining Markdown."""
+    _, _, folder=ensure_project(root,project)
+    changed=0
+    for path in folder.rglob('*.md'):
+        before=path.read_text(encoding='utf-8')
+        after=normalize_report(before)
+        if before.rstrip() != after:
+            _write_report(path,after);changed+=1
+    return changed
+
+
+def consolidate_assignment_reports(root,project):
+    """Keep one current report per agent and move prior assignment snapshots to archive."""
+    slug,label,folder=ensure_project(root,project);assignments=folder/'assignments';archive=folder/'archive'/'assignments';current=folder/'agent-reports'
+    filenames=('morgan-operations.md','avery-marketing.md','jordan-web-it.md','cameron-hr-legal.md')
+    if not assignments.exists():return {'project':slug,'moved':0,'updated':0}
+    latest={}
+    for path in assignments.glob('*/*.md'):
+        if path.name in filenames and (path.name not in latest or path.stat().st_mtime>latest[path.name].stat().st_mtime):latest[path.name]=path
+    updated=0
+    for name,path in latest.items():
+        target=current/name
+        if not target.exists() or path.stat().st_mtime>target.stat().st_mtime:
+            _write_report(target,path.read_text());updated+=1
+    moved=0;archive.mkdir(parents=True,exist_ok=True)
+    for directory in list(assignments.iterdir()):
+        if not directory.is_dir():continue
+        target=archive/directory.name
+        if target.exists():target=archive/(directory.name+'-'+uuid.uuid4().hex[:8])
+        directory.replace(target);moved+=1
+    try:assignments.rmdir()
+    except OSError:pass
+    from report_records import metadata_many
+    metadata_many(root,current.glob('*.md'))
+    summary=consolidated_project_report(root,slug)
+    return {'project':slug,'moved':moved,'updated':updated,'consolidated':summary['id']}
 
 def delete_report(root,identifier):
     report_root=(Path(root)/'reports').resolve();path=(report_root/str(identifier)).resolve()

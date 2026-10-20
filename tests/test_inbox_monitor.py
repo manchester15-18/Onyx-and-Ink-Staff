@@ -38,10 +38,15 @@ class FakeIMAP:
 class InboxTests(unittest.TestCase):
     def test_routing_authentication_and_loop_exclusions(self):
         with tempfile.TemporaryDirectory() as d:
-            mail=StaffMail(d,'draft',ADDRESSES,bcc='owner@gmail.com')
+            mail=StaffMail(d,'draft',{**ADDRESSES,'Shared':'shared@example.com'},bcc='owner@gmail.com')
             self.assertEqual(message_route(email(),mail),('Avery','Owner'))
             self.assertEqual(message_route(email('avery@example.com','jordan@example.com, morgan@example.com','handoff'),mail),('Jordan','Avery'))
             self.assertEqual(message_route(email('avery@example.com','jordan@example.com','message'),mail),('Jordan','Avery'))
+            shared=email('shared@example.com','cameron@example.com','message')
+            shared.replace_header('From','Morgan | Onyx and Ink <shared@example.com>')
+            self.assertEqual(message_route(shared,mail),('Cameron','Morgan'))
+            sent=email('avery@example.com','jordan@example.com','message');del sent['Authentication-Results']
+            self.assertEqual(message_route(sent,mail),('Jordan','Avery'))
             self.assertIsNone(message_route(email(kind='reply'),mail))
             self.assertIsNone(message_route(email(kind='report'),mail))
             self.assertEqual(message_route(email('stranger@example.com'),mail),('Avery','stranger@example.com'))

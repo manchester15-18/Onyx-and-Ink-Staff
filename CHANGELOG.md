@@ -1,5 +1,36 @@
 # Application changelog
 
+## 2026-10-06 — Role-specific cloud AI routing
+
+- Added Gemini, Cerebras, Cloudflare, Mistral, and OpenRouter adapters alongside Groq, with role-specific routing for chat, drafts, inbox replies, and autonomous work.
+- Added shared usage reservations, provider cooldowns, and a free-only OpenRouter final fallback. No local inference is used.
+- Added cloud model settings and configured-route visibility. Paid Gemini and Mistral use stays disabled by default.
+- This stage accepts text; image, PDF, audio, and video inputs remain a later stage.
+
+## 2026-10-05 — Browser request ID compatibility
+
+- Added a UUID fallback for browsers without crypto.randomUUID when opening email, replying, composing, and chatting.
+
+## 2026-10-05 — Settings initialization
+
+- Wait for dashboard status before sending API actions and share concurrent status requests.
+- Report unavailable or expired sessions without accessing a missing token.
+
+## 2026-10-05 — Windows host password display
+
+- Recognize authenticated localhost password-display requests forwarded by Windows Docker while rejecting LAN origins and cloud mode.
+- Display a configured password only when it matches the current verifier; reject stale saved passwords.
+
+## 2026-10-05 — Windows wording and setup
+
+- Replaced platform mentions in dashboard labels, errors, source comments, and documentation with Windows wording.
+- Replaced the previous platform service installer with the Windows Docker startup entry point.
+
+## 2026-10-05 — Dashboard login feedback
+
+- Prevented the password display from returning an outdated migrated Wi-Fi password.
+- Added connection error feedback and duplicate-submit protection to dashboard sign-in.
+
 ## 2026-10-03 — Inbox and staff chat improvements
 
 - Set the Owner mailbox to ceo@onyxandink.org.
@@ -444,3 +475,8 @@
 - Updated the Windows Docker deployment (`deploy/windows/compose.yml`).
 
 <!-- backup 090e74e0ca63d177ce61a95a64f5b98cc754b2cf2b5763cef2620c0df61b59e8 -->
+# Multimodal dashboard chat — October 6, 2026
+
+- Added selected image and document attachments to all four agent chats, with compatible cloud vision routing and shared image-token budgets.
+- Added PDF text extraction and scanned-page rendering, DOCX/text support, attachment validation, and explicit size/page limits.
+- Text-only providers are skipped for images. Attachments cannot authorize tools; existing email approvals remain in effect.

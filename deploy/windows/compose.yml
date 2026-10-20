@@ -8,11 +8,13 @@ services:
       - ../../.env
     environment:
       ONYX_CLOUD_MODE: "false"
+      ONYX_WINDOWS_DOCKER: "true"
       ONYX_BIND_HOST: "0.0.0.0"
       PORT: "8765"
     ports:
+      # A single bind serves localhost and the LAN address. Publishing the same
+      # container port twice is unreliable on Docker Desktop for Windows.
       - "8765:8765"
-      - "8766:8766"
     volumes:
       - ../../.env:/app/.env
       - ../../google-oauth-client.json:/app/google-oauth-client.json:ro

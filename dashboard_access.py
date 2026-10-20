@@ -31,6 +31,27 @@ class Access:
     def settings(self):
         try:return json.loads(self.path.read_text())
         except (OSError,ValueError):return {}
+    def local_password(self):
+        """Never display a migrated password that no longer matches the verifier."""
+        try:
+            cfg=self.settings()
+            candidates=[os.environ.get('DASHBOARD_PASSWORD','')]
+            try:candidates.append((self.root/'work'/'wifi-password.txt').read_text().strip())
+            except OSError:pass
+            for password in candidates:
+                derived=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(cfg.get('salt','')),300000).hex()
+                if password and cfg.get('hash') and hmac.compare_digest(derived,cfg['hash']):return password
+        except (OSError,ValueError,TypeError):pass
+        raise RuntimeError('The saved Wi-Fi password is unavailable or outdated. Use your configured dashboard password.')
+    def host_pc(self,handler):
+        """Recognize authenticated localhost requests forwarded by Windows Docker."""
+        if self.cloud_mode:return False
+        if handler.client_address[0] in ('127.0.0.1','::1'):return True
+        if os.environ.get('ONYX_WINDOWS_DOCKER','').lower()!='true' or not self.require_login:return False
+        host=handler.headers.get('Host','')
+        return (host in {'localhost:8765','127.0.0.1:8765'}
+                and handler.headers.get('Origin','')=='http://'+host
+                and self.authenticated(handler))
     def authenticated(self,handler):
         if not self.require_login and handler.client_address[0] in ('127.0.0.1','::1') and not isinstance(handler.connection,ssl.SSLSocket):return True
         cookie=SimpleCookie()

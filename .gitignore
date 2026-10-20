@@ -26,9 +26,10 @@
 !/deploy/windows/
 !/deploy/windows/*.md
 !/deploy/windows/*.ps1
+!/deploy/windows/*.cmd
 !/deploy/windows/*.sh
 !/deploy/windows/*.yml
-# Private configuration and runtime data stay on this Mac.
+# Private configuration and runtime data stay on this Windows PC.
 .env*
 !/.env.example
 .emv*
@@ -46,3 +47,4 @@ reports/
 Users/
 code/
 .DS_Store
+

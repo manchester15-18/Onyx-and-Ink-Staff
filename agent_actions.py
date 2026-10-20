@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 import uuid
+import zipfile
 from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlparse
@@ -13,14 +14,17 @@ import requests
 from dotenv import dotenv_values
 from workspace_tools import Workspace
 from staff_email import StaffMail, STAFF, valid_address
-from report_projects import active_project, ensure_project, project_slug
+from report_projects import active_project, ensure_project, project_slug, project_context, project_overview, save_project_overview, consolidated_project_report
+from storefront import Storefront
+from staff_tasks import enqueue as enqueue_staff_task
 
 CATALOG = '''Actions (use exact names and argument keys):
-report {project:project name optional,title,text}; document {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]};
+report {project:project name optional,title,text}; document {title,text}; word_document {title,text}; pdf {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]}; print_sheet {title,file_ids:[generated PNG/JPEG IDs]}; drive_search {query}; drive_download {id,name};
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
-design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; files {}; staff_reports {name:marketing,storefront,policy,operations,or all}; workspace_files {};
+design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; workspace_files {};
+products {query:optional}; product_update {id:optional existing/new product ID,title,description,price,image_file_id:optional uploaded/generated image,status:draft,ready,or published}; square_import_website {url:optional public store URL};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
-search {query}; webpage {url}. Workspace creation/upload is automatic. Email to James (CEO), Jaunee (Vice President), or named Onyx & Ink agents sends automatically; email to any outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
+search {query}; webpage {url}. Workspace creation/upload is automatic. Use staff_message for ordinary agent-to-agent coordination in the configured Discord workspace or Telegram staff group. Email to James (CEO), Jaunee (Vice President), named Onyx & Ink agents, or an address explicitly listed in AUTONOMOUS_EXTERNAL_EMAILS sends automatically; any other outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
 
 class Actions:
     def __init__(self, root, agent, run_id, delete_ids=None):
@@ -28,6 +32,7 @@ class Actions:
         self.root=Path(root);self.agent=agent;self.run_id=run_id
         self.folder=self.root/'work'/'artifacts';self.folder.mkdir(parents=True,exist_ok=True)
         self.workspace=Workspace(root)
+        self.storefront=Storefront(root)
     def db(self):
         db=sqlite3.connect(self.root/'work'/'agent-actions.sqlite3')
         db.execute('CREATE TABLE IF NOT EXISTS actions (id TEXT PRIMARY KEY,run TEXT,agent TEXT,action TEXT,status TEXT,result TEXT,created TEXT DEFAULT CURRENT_TIMESTAMP)')
@@ -51,15 +56,56 @@ class Actions:
         else:
             slug,label,folder=active_project(self.root)
         assignment=folder/'agent-drafts'/self.agent.lower();assignment.mkdir(parents=True,exist_ok=True)
-        cleaned=self.clean(text);identifier=uuid.uuid4().hex;report_text=cleaned
+        cleaned=self.clean(text);report_text=cleaned
         if not re.search(r'(?m)^#\s+',report_text):report_text='# '+str(title).strip()+'\n\n'+report_text
-        path=assignment/(project_slug(title)+'-'+identifier[:8]+'.md')
-        path.write_text(report_text+('' if report_text.endswith('\n') else '\n'));path.chmod(0o600)
-        from report_records import auto_export_reference
-        auto_export_reference(self.root,path)
+        path=assignment/(project_slug(title)+'.md');existed=path.exists()
+        temporary=path.with_suffix('.tmp');temporary.write_text(report_text+('' if report_text.endswith('\n') else '\n'));temporary.chmod(0o600);temporary.replace(path)
         result=self.save(title,cleaned.encode(),'.md','project-report')
-        result.update({'project':slug,'project_name':label,'dashboard':'/reports'})
+        result.update({'project':slug,'project_name':label,'dashboard':'/reports','updated':existed})
         return result
+
+    def save_word_document(self,title,text):
+        safe=self.clean(text)
+        escaped=lambda value:__import__('html').escape(value,quote=False)
+        paragraphs=''.join('<w:p><w:r><w:t xml:space="preserve">'+escaped(line or ' ')+'</w:t></w:r></w:p>' for line in safe.splitlines())
+        document='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+paragraphs+'<w:sectPr/></w:body></w:document>'
+        content=io.BytesIO()
+        with zipfile.ZipFile(content,'w',zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>')
+            archive.writestr('_rels/.rels','<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>')
+            archive.writestr('word/document.xml',document)
+        return self.save(title,content.getvalue(),'.docx','word-document')
+
+    def save_pdf(self,title,text):
+        import fitz
+        doc=fitz.open();remaining=self.clean(text)
+        while remaining:
+            cut=min(3200,len(remaining));split=remaining.rfind('\n',0,cut)
+            if split<1:split=cut
+            page=doc.new_page();page.insert_textbox(fitz.Rect(54,54,541,788),remaining[:split],fontsize=11,fontname='helv',lineheight=1.35)
+            remaining=remaining[split:].lstrip()
+        data=doc.tobytes(garbage=4,deflate=True);doc.close()
+        return self.save(title,data,'.pdf','pdf')
+
+    def print_sheet(self,title,identifiers):
+        if not isinstance(identifiers,list) or not 1<=len(identifiers)<=12:raise ValueError('Choose 1–12 generated PNG or JPEG files.')
+        files=[self.file(identifier) for identifier in identifiers]
+        if any(path.suffix.lower() not in ('.png','.jpg','.jpeg') for path in files):raise ValueError('A print sheet needs PNG or JPEG design files.')
+        import fitz
+        from PIL import Image,ImageOps,ImageDraw
+        page_width,page_height=2550,3300; margin=120; columns=2; rows=(len(files)+1)//2
+        canvas=Image.new('RGB',(page_width,page_height),'white');draw=ImageDraw.Draw(canvas)
+        cell_width=(page_width-margin*(columns+1))//columns;cell_height=(page_height-margin*(rows+1))//rows
+        for index,path in enumerate(files):
+            with Image.open(path) as image:
+                image=ImageOps.exif_transpose(image).convert('RGB');image.thumbnail((cell_width,cell_height))
+                column=index%columns;row=index//columns;x=margin+column*(cell_width+margin)+(cell_width-image.width)//2;y=margin+row*(cell_height+margin)+(cell_height-image.height)//2
+                canvas.paste(image,(x,y))
+        preview=io.BytesIO();canvas.save(preview,format='PNG',dpi=(300,300))
+        document=fitz.open();page=document.new_page(width=612,height=792);page.insert_image(page.rect,stream=preview.getvalue());pdf=document.tobytes(garbage=4,deflate=True);document.close()
+        pdf_result=self.save(title,pdf,'.pdf','print-sheet-pdf');png_result=self.save(title,preview.getvalue(),'.png','print-sheet-preview')
+        return {'pdf':pdf_result,'png':png_result,'result':'Print-sheet PDF and PNG preview created from verified staff files.'}
+
     def file(self,identifier):
         if not re.fullmatch('[a-f0-9]{32}',str(identifier)):raise ValueError('Choose a generated staff file.')
         with closing(self.db()) as db:row=db.execute('SELECT name FROM files WHERE id=?',(identifier,)).fetchone()
@@ -76,7 +122,7 @@ class Actions:
             return [dict(zip(('agent','action','status','result','created'),row)) for row in db.execute('SELECT agent,action,status,result,created FROM actions ORDER BY rowid DESC LIMIT 30')]
     def execute(self,action,args):
         if not isinstance(args,dict):raise ValueError('Action arguments must be an object.')
-        identifier=hashlib.sha256((self.run_id+action+json.dumps(args,sort_keys=True)).encode()).hexdigest()
+        identifier=hashlib.sha256((self.run_id+self.agent+action+json.dumps(args,sort_keys=True)).encode()).hexdigest()
         with closing(self.db()) as db:
             row=db.execute('SELECT result FROM actions WHERE id=?',(identifier,)).fetchone()
             if row:return json.loads(row[0])
@@ -95,18 +141,39 @@ class Actions:
         return value.strip()
     def dispatch(self,action,a):
         if self.agent not in STAFF:raise ValueError('Choose a staff agent.')
-        if action in ('report','document','spreadsheet','presentation'):
+        # Cloud models occasionally use the integration's product name instead
+        # of the concise action name.  Keep documented aliases deterministic.
+        action=str(action).strip().lower().replace('-','_').replace(' ','_')
+        aliases={
+            'google_drive':'workspace_files','drive_files':'workspace_files','list_drive_files':'workspace_files',
+            'google_drive_upload':'upload','drive_upload':'upload','upload_to_drive':'upload',
+            'google_doc':'document','google_docs':'document','google_sheet':'spreadsheet','google_sheets':'spreadsheet',
+            'google_slides':'presentation','create_pdf':'pdf','create_docx':'word_document','docx':'word_document',
+        }
+        action=aliases.get(action,action)
+        if action in ('report','document','word_document','pdf','spreadsheet','presentation'):
             title=self.text(a,'title',160)
             if action=='report':return self.save_report(title,self.text(a,'text'),a.get('project'))
             if action=='document':return self.workspace.create_doc(title,self.clean(self.text(a,'text')))
+            if action=='word_document':return self.save_word_document(title,self.text(a,'text'))
+            if action=='pdf':return self.save_pdf(title,self.text(a,'text'))
             if action=='spreadsheet':
                 values=a.get('values')
                 if not isinstance(values,list) or not values or len(values)>200 or any(not isinstance(r,list) or len(r)>30 or any(not isinstance(c,(str,int,float,bool)) or len(str(c))>2000 for c in r) for r in values):raise ValueError('Use up to 200 rows and 30 columns of plain values.')
                 values=json.loads(self.clean(json.dumps(values)))
                 return self.workspace.create_sheet(title,values)
             slides=a.get('slides')
-            if not isinstance(slides,list) or not 1<=len(slides)<=15 or any(not isinstance(s,str) or not s or len(s)>3000 for s in slides):raise ValueError('Use 1–15 slides, each under 3,000 characters.')
+            if not isinstance(slides,list) or not 3<=len(slides)<=15 or any(not isinstance(s,str) or len(s.strip())<40 or len(s)>3000 for s in slides):raise ValueError('Use 3–15 substantive slides, each with at least 40 characters and under 3,000 characters.')
             return self.workspace.create_slides(title,[self.clean(s) for s in slides])
+        if action=='print_sheet':return self.print_sheet(self.text(a,'title',160),a.get('file_ids'))
+        if action=='drive_search':return {'files':self.workspace.find_files(self.text(a,'query',160)).get('files',[])}
+        if action=='drive_download':
+            identifier=self.text(a,'id',200);name=self.text(a,'name',180)
+            if Path(name).suffix.lower() not in ('.png','.jpg','.jpeg'):raise ValueError('Choose a PNG or JPEG Drive design file.')
+            data,_=self.workspace.download(identifier)
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image:image.verify()
+            return self.save(name,data,Path(name).suffix.lower(),'drive-design')
         if action=='email':
             cfg=dotenv_values(self.root/'.env')
             if cfg.get('STAFF_EMAIL_MODE')=='off':raise ValueError('Email is disabled in Settings.')
@@ -115,12 +182,16 @@ class Actions:
             if not isinstance(ids,list) or len(ids)>3:raise ValueError('Attach at most three generated files.')
             attachments=[self.file(i) for i in ids]
             internal=to=='all_agents' or to in (*STAFF,'Owner','James','Jaunee')
-            mail=StaffMail.from_env(self.root,config=cfg) if internal else StaffMail.from_env(self.root,mode='draft',config=cfg)
+            approved_external={item.strip().lower() for item in str(cfg.get('AUTONOMOUS_EXTERNAL_EMAILS','')).split(',') if valid_address(item.strip())}
+            autonomous_external=valid_address(to) and to.lower() in approved_external
+            mail=StaffMail.from_env(self.root,config=cfg) if internal or autonomous_external else StaffMail.from_env(self.root,mode='draft',config=cfg)
             if to=='all_agents':result=mail.deliver(self.agent,list(STAFF),subject,body,attachments=attachments)
             elif to in (*STAFF,'Owner','James','Jaunee'):result=mail.deliver(self.agent,[to],subject,body,attachments=attachments,important=to in ('Owner','James'))
             elif valid_address(to):result=mail.deliver(self.agent,['Owner'],subject,body,kind='compose',reply_address=to,attachments=attachments)
             else:raise ValueError('Use a staff name or one valid recipient address.')
-            return {'result':result,'approval':'Sent automatically to Onyx & Ink staff/CEO.' if internal else 'Review in Outbox and click Approve & send.','url':'/activity'}
+            if str(result).startswith('Email delivery unconfirmed'):
+                raise RuntimeError('Email delivery was unconfirmed by the SMTP server. The message is preserved in Outbox and was not reported as sent.')
+            return {'result':result,'approval':'Sent automatically to an approved staff or external recipient.' if internal or autonomous_external else 'Review in Outbox and click Approve & send.','url':'/activity'}
         if action in ('inbox','read_email','reply_email','delete_email'):
             from dashboard_mail import Mailbox
             box=Mailbox(self.root)
@@ -144,19 +215,136 @@ class Actions:
             result=mail.deliver(self.agent,['Owner'],subject,self.clean(self.text(a,'body')),kind='reply',reply_address=original['replyTo'],in_reply_to=original['messageId'],references=original.get('references') or None)
             return {'result':result,'approval':'Review reply in Outbox before sending.','url':'/activity'}
         if action=='files':return {'files':self.files()}
+        if action in ('staff_group_post','staff_message'):
+            message=self.clean(self.text(a,'text',4000));recipient=''
+            if action=='staff_message':
+                recipient=self.text(a,'to',30).title()
+                if recipient not in STAFF:raise ValueError('Choose Morgan, Avery, Jordan, or Cameron.')
+            ids=a.get('attachments',[])
+            if not isinstance(ids,list) or len(ids)>3:raise ValueError('Attach at most three generated files.')
+            files=[self.file(identifier) for identifier in ids]
+            cfg=dotenv_values(self.root/'.env')
+            # Discord is the primary staff workspace when enabled. It provides
+            # restricted role channels, threads, and normal file delivery.
+            if str(cfg.get('DISCORD_ENABLED','')).lower()=='true' and cfg.get('DISCORD_BOT_TOKEN'):
+                from discord_bridge import DiscordBridge
+                result=DiscordBridge(self.root,None,None).send(self.agent,message,files,recipient)
+                if recipient:
+                    task=enqueue_staff_task(self.root,self.agent,recipient,message,active_project(self.root)[0])
+                    result['task_id']=task['id']
+                return result
+            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
+            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
+            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure Discord, or configure the staff Telegram group and this agent’s dedicated bot in Settings.')
+            prefix=('[[ONYX_STAFF target='+recipient+' hops=1]] ') if recipient else ''
+            response=requests.post('https://api.telegram.org/bot'+token+'/sendMessage',json={'chat_id':chat,'text':prefix+message},timeout=30)
+            if not response.ok:raise RuntimeError('Telegram staff group delivery failed.')
+            for path in files:
+                with path.open('rb') as stream:
+                    sent=requests.post('https://api.telegram.org/bot'+token+'/sendDocument',data={'chat_id':chat,'caption':prefix+path.name[:150]},files={'document':(path.name,stream)},timeout=45)
+                if not sent.ok:raise RuntimeError('Telegram delivered the message but could not deliver one attachment.')
+            result={'result':('Telegram message sent to '+recipient if recipient else 'Telegram staff-group message posted')+(' with '+str(len(files))+' file(s).' if files else '.'),'channel':chat}
+            if recipient:
+                task=enqueue_staff_task(self.root,self.agent,recipient,message,active_project(self.root)[0])
+                result['task_id']=task['id']
+            return result
+        if action=='square_import_website':
+            if self.agent!='Jordan':raise ValueError('Only Jordan manages Square catalog imports.')
+            from square_commerce import SquareCommerce
+            from website_catalog import collect,download_image
+            square=SquareCommerce(self.root)
+            if not square.configured:raise ValueError('Connect Square in Settings before importing products.')
+            url=str(a.get('url') or dotenv_values(self.root/'.env').get('BUSINESS_WEBSITE','')).strip()
+            parsed=urlparse(url)
+            if parsed.scheme!='https' or not parsed.hostname:raise ValueError('Use the public HTTPS storefront URL.')
+            source=collect(url)
+            if not source:raise RuntimeError('No public product cards were found on the current storefront.')
+            imported=[];failed=[]
+            for item in source:
+                image_path=None
+                try:
+                    image_path=download_image(item.pop('image_url',''))
+                    product=self.storefront.update({**item,'status':'published'})
+                    result=square.publish_product(product,image_path)
+                    self.storefront.set_square_item(product['id'],result['square_item_id'])
+                    imported.append(product['title'])
+                except Exception as error:failed.append(item.get('title','product'))
+                finally:
+                    if image_path:
+                        try:image_path.unlink()
+                        except OSError:pass
+            return {'result':'Imported '+str(len(imported))+' of '+str(len(source))+' public storefront products into Square '+square.mode+'.','imported':imported,'failed':failed,'environment':square.mode}
+        if action=='products':
+            if self.agent!='Jordan':raise ValueError('Only Jordan manages the storefront catalog.')
+            return {'products':self.storefront.list(str(a.get('query','')))}
+        if action=='product_update':
+            if self.agent!='Jordan':raise ValueError('Only Jordan manages the storefront catalog.')
+            image=None;image_id=a.get('image_file_id')
+            if image_id:
+                path=self.file(image_id)
+                if path.suffix.lower() not in ('.png','.jpg','.jpeg','.webp'):raise ValueError('Choose a PNG, JPEG, or WebP product image.')
+                image=(str(image_id),path.name)
+            product=self.storefront.update(a,image=image)
+            if product['status']=='published':
+                from square_commerce import SquareCommerce
+                square=SquareCommerce(self.root)
+                if not square.configured:
+                    product['status']='ready'
+                    self.storefront.update({**product,'status':'ready'},image=image)
+                    product['result']='Saved as ready for Square. Connect Square in Settings before publishing.'
+                else:
+                    image_path=self.file(product['image_file_id']) if product.get('image_file_id') else None
+                    result=square.publish_product(product,image_path)
+                    self.storefront.set_square_item(product['id'],result['square_item_id'])
+                    product.update(result);product['status']='published';product['result']='Published to Square '+result['environment']+' catalog.'
+            else:product['result']='Product saved in the local catalog.'
+            return product
+        if action=='project_context':return {'dashboard':'/reports','project_context':project_context(self.root)}
+        if action in ('project_create','project_brief_update'):
+            if self.agent!='Morgan':raise ValueError('Only Morgan manages project creation and project briefings.')
+            reason=self.text(a,'reason',800)
+            if len(reason)<20:raise ValueError('Update a project only when needed; provide a specific reason of at least 20 characters.')
+            body=self.text(a,'overview',20000)
+            required=('## Background','## Goals','## Desired outcomes')
+            if not all(section.lower() in body.lower() for section in required):
+                raise ValueError('A project briefing needs Background, Goals, and Desired outcomes sections.')
+            if action=='project_create':
+                name=self.text(a,'name',80);slug=project_slug(name)
+                if any(item['id']==slug for item in __import__('report_projects').projects(self.root)):
+                    raise ValueError('That project already exists. Use project_brief_update only when the briefing has materially changed.')
+                slug,label,_=ensure_project(self.root,name,name,activate=a.get('activate') is True)
+            else:
+                slug=str(a.get('project') or active_project(self.root)[0]).strip()
+                current=project_overview(self.root,slug)['body']
+                compact=lambda value:re.sub(r'\s+',' ',value).strip().casefold()
+                if compact(current)==compact(body):raise ValueError('The briefing is unchanged; no update was saved.')
+                # Preserve the prior briefing for recovery and review before replacing it.
+                _,_,folder=ensure_project(self.root,slug)
+                history=folder/'overview-history';history.mkdir(exist_ok=True)
+                stamp=__import__('datetime').datetime.now().strftime('%Y%m%d-%H%M%S')
+                previous=history/(stamp+'-overview.md');previous.write_text(current.rstrip()+'\n',encoding='utf-8');previous.chmod(0o600)
+            result=save_project_overview(self.root,slug,body)
+            report=consolidated_project_report(self.root,slug)
+            result.update({'message':'Project created.' if action=='project_create' else 'Project briefing updated because the recorded project context changed.','reason':self.clean(reason),'consolidated_report':report['id'],'dashboard':'/reports'})
+            return result
         if action=='staff_reports':
             name=str(a.get('name','all')).strip().lower()
-            choices={'marketing':'marketing_campaign.md','storefront':'web_dev_specs.md','policy':'legal_terms.md','operations':'operational_plan.md'}
-            if name!='all' and name not in choices:raise ValueError('Choose marketing, storefront, policy, operations, or all.')
+            choices={'morgan':'morgan-operations.md','avery':'avery-marketing.md','jordan':'jordan-web-it.md','cameron':'cameron-hr-legal.md',
+                     'operations':'morgan-operations.md','marketing':'avery-marketing.md','storefront':'jordan-web-it.md','policy':'cameron-hr-legal.md'}
+            if name!='all' and name not in choices:raise ValueError('Choose morgan, avery, jordan, cameron, or all.')
             selected=choices.items() if name=='all' else [(name,choices[name])]
             reports={}
             for label,filename in selected:
                 _,_,folder=active_project(self.root)
-                matches=sorted(folder.glob('**/'+filename),key=lambda path:path.stat().st_mtime,reverse=True)
+                matches=sorted((folder/'agent-reports').glob(filename),key=lambda path:path.stat().st_mtime,reverse=True)
+                if not matches:
+                    legacy={'avery-marketing.md':'marketing_campaign.md','jordan-web-it.md':'web_dev_specs.md','cameron-hr-legal.md':'legal_terms.md','morgan-operations.md':'operational_plan.md'}[filename]
+                    matches=sorted(folder.glob('**/'+legacy),key=lambda path:path.stat().st_mtime,reverse=True)
                 try:reports[label]=matches[0].read_text()[:5000]
                 except IndexError:reports[label]='No saved report yet.'
             return {'dashboard':'/reports','reports':reports}
-        if action=='upload':return self.workspace.upload(self.file(a.get('file_id','')),self.file(a.get('file_id','')).name)
+        if action in ('upload','share_drive'):
+            file=self.file(a.get('file_id',''));return self.workspace.upload(file,file.name)
         if action=='workspace_files':return self.workspace.list_files()
         if action=='calendar':return self.workspace.calendar()
         if action=='calendar_event':
@@ -189,4 +377,5 @@ class Actions:
             if reference and reference.suffix!='.png':raise ValueError('Choose a generated design as the reference.')
             data=generate(self.root,self.clean(self.text(a,'prompt',2048)),model,reference=reference)
             return self.save('Design by '+self.agent,data,'.png','design')
-        raise ValueError('Unknown staff action.')
+        raise ValueError('Unknown action "'+action+'". Choose an action from the available staff tools.')
+

@@ -11,6 +11,8 @@ def normalize_report(value):
     text=re.sub(r'(?im)^\s*(?:thought\s*:.*|action\s*:\s*final answer\s*|final answer\s*:)\s*$', '', text)
     text=re.sub(r'(?im)^\s*```(?:markdown|md)?\s*$', '', text)
     text=re.sub(r'(?m)^\s*```\s*$', '', text)
+    # Provider safety labels are transport residue, not report content.
+    text=re.sub(r'(?im)^\s*(?:user|response)\s+safety\s*:\s*(?:safe|unsafe)\s*$', '', text)
     text=re.sub(r'(?m)^\s*[*+-]\s{2,}', '- ', text)
     text=re.sub(r'[ \t]+$', '', text, flags=re.M)
     return re.sub(r'\n{3,}', '\n\n', text).strip()

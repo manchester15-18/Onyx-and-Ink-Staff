@@ -60,6 +60,15 @@ class StaffMailTests(unittest.TestCase):
             self.assertIn(ADDRESSES['Jordan'],str(msg['To']));self.assertIn(ADDRESSES['Morgan'],str(msg['To']))
             self.assertNotIn(ADDRESSES['Owner'],str(msg['To']))
 
+    def test_coordination_email_is_rate_limited_across_mail_instances(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first=StaffMail(directory,'draft',ADDRESSES)
+            self.assertIn('drafted',first.deliver('Morgan',['Cameron'],'Policy status','Please send the current policy status.'))
+            second=StaffMail(directory,'draft',ADDRESSES)
+            self.assertIn('suppressed',second.deliver('Morgan',['Cameron'],'Policy status follow-up','Any update?'))
+            message=BytesParser(policy=policy.default).parsebytes(next(first.outbox.glob('*.eml')).read_bytes())
+            self.assertEqual(message['X-Onyx-Ink-Sender'],'Morgan')
+
     def test_rejects_external_recipient_injection_and_limits(self):
         with tempfile.TemporaryDirectory() as directory:
             mail=StaffMail(directory,'draft',ADDRESSES,limit=1)

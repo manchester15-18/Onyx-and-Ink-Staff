@@ -3,26 +3,46 @@ const $=id=>document.getElementById(id);
 const el=(tag,cls,text)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n};
 const on=(id,ev,fn)=>$(id).addEventListener(ev,fn);
 const cap=s=>s[0].toUpperCase()+s.slice(1);
+function requestId(){
+  if(typeof globalThis.crypto?.randomUUID==='function')return globalThis.crypto.randomUUID();
+  const bytes=new Uint8Array(16);
+  if(typeof globalThis.crypto?.getRandomValues==='function')globalThis.crypto.getRandomValues(bytes);
+  else for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+  bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+  const hex=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+}
 
 if($('loginForm')){
   on('loginForm','submit',async e=>{e.preventDefault();
-    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('loginPassword').value})});
-    const d=await r.json();if(r.ok)location.reload();else $('loginNotice').textContent=d.error});
+    const button=$('loginForm').querySelector('button[type="submit"]');button.disabled=true;$('loginNotice').textContent='Signing in…';
+    try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:$('loginPassword').value})});
+      const d=await r.json();if(r.ok)location.reload();else $('loginNotice').textContent=d.error||'Sign-in failed. Please try again.'}
+    catch{$('loginNotice').textContent='Unable to reach the dashboard. Check your connection and try again.'}
+    finally{button.disabled=false}});
   return;
 }
 
 const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
-const FAILED=/^I could not reach the AI service/;
-let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,reportProject='',pal=0,signaturesReady=false,autonomyReady=false;
+const FAILED=/^I could not reach (?:the AI service|a compatible cloud)/;
+let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,reportProject='',pal=0,signaturesReady=false,autonomyReady=false,modelSettingsReady=false;
 const busy=new Set();let inboxMessages=[],inboxNext=null,inboxVersion=0,readVersion=0,replyAttachments=[],composeAttachments=[],uploading=0;
+const BUSINESS_TZ='America/New_York';
+const timeET=value=>new Intl.DateTimeFormat('en-US',{timeZone:BUSINESS_TZ,timeStyle:'short'}).format(new Date(value));
+const dateTimeET=value=>new Intl.DateTimeFormat('en-US',{timeZone:BUSINESS_TZ,dateStyle:'medium',timeStyle:'short'}).format(new Date(value));
+const hourET=()=>Number(new Intl.DateTimeFormat('en-US',{timeZone:BUSINESS_TZ,hour:'numeric',hourCycle:'h23'}).formatToParts(new Date()).find(p=>p.type==='hour').value);
 
 const isBad=a=>a.status==='delivery-unconfirmed'||a.status==='partially-accepted';
 
 /* ---------- plumbing ---------- */
 async function api(path,data={}){
-  const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Dashboard-Token':S.token},body:JSON.stringify(data)});
-  const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed.');return j}
+  if(!S?.token)await refresh();
+  if(!S?.token)throw Error('Dashboard is still connecting or your session has expired. Please sign in again if prompted.');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),60000);
+  try{const r=await fetch('/api/'+path,{method:'POST',headers:{'Content-Type':'application/json','X-Dashboard-Token':S.token},body:JSON.stringify(data),signal:controller.signal});
+    const j=await r.json();if(!r.ok)throw Error(j.error||'Request failed.');return j
+  }catch(error){if(error.name==='AbortError')throw Error('This request took more than one minute. Check Outbox before retrying.');throw error}finally{clearTimeout(timer)}}
 function toast(msg,kind='ok',action){if(!msg)return;const t=el('div','toast '+kind,msg);
   if(action){const b=el('button','lnk',action[0]);b.onclick=()=>{action[1]();t.remove()};t.append(b)}
   $('toasts').append(t);setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),250)},action?7000:4500)}
@@ -38,8 +58,17 @@ function renderReport(text){const box=$('reportBody');box.replaceChildren();cons
   const close=()=>{list=null;type=''};for(const raw of lines){const line=raw.trim();if(!line){close();continue}const h=line.match(/^(#{1,4})\s+(.+)$/),section=line.match(/^\*\*([^*]+)\*\*$/),bullet=line.match(/^[-*+]\s+(.+)$/),num=line.match(/^\d+[.)]\s+(.+)$/);
     if(h){close();const n=el('h'+Math.min(4,h[1].length+1));n.append(reportInline(h[2]));box.append(n)}else if(section){close();box.append(el('h3','',section[1]))}else if(bullet||num){const wanted=bullet?'ul':'ol';if(!list||type!==wanted){list=el(wanted);type=wanted;box.append(list)}const li=el('li');li.append(reportInline((bullet||num)[1]));list.append(li)}else{close();const p=el('p');p.append(reportInline(line));box.append(p)}}
   if(!box.childNodes.length)box.append(el('p','empty','This report is empty.'))}
-async function refresh(){try{const r=await fetch('/api/status');if(r.status===401){location.reload();return}if(!r.ok)throw 0;
-  const text=await r.text();if(text===sig&&S)return;sig=text;S=JSON.parse(text);render()}catch{$('connection').textContent='Dashboard offline'}}
+let statusRequest=null;
+async function refresh(){
+  if(statusRequest)return statusRequest;
+  statusRequest=refreshState();
+  try{return await statusRequest}finally{statusRequest=null}
+}
+async function refreshState(){try{const r=await fetch('/api/status');if(r.status===401){S=null;location.reload();return}if(!r.ok)throw 0;
+  const text=await r.text();if(text===sig&&S)return;sig=text;S=JSON.parse(text);render();
+  if($('modelRoutingStatus'))$('modelRoutingStatus').textContent=Object.entries(S.modelRouting||{}).map(([name,route])=>name+': '+route.primary+' · configured: '+(route.availableRoutes.join(' → ')||'none configured')).join('\n');
+  if(!modelSettingsReady&&S.modelSettings){for(const [provider,settings] of Object.entries(S.modelSettings)){if($(provider+'Model'))$(provider+'Model').value=settings.model;if($(provider+'Free'))$(provider+'Free').checked=settings.freeConfirmed}modelSettingsReady=true}
+  }catch{$('connection').textContent='Dashboard offline'}}
 
 /* ---------- derived status (real data only) ---------- */
 function agentState(name){
@@ -47,8 +76,18 @@ function agentState(name){
   if(bad)return['need',bad+' unconfirmed send'+(bad>1?'s':'')];
   if(drafts)return['busy',drafts+' draft'+(drafts>1?'s':'')+' awaiting you'];
   return S.monitor?['live','Monitor running']:['off','Monitor stopped']}
+function liveAgentState(name){
+  const au=S.autonomy||{},work=S.workStatus||{},current=work.agents?.[name],details=work.agentDetails?.[name]||'';
+  if(au.running&&current==='working')return['Working',details||'Completing the current assignment.','live'];
+  if(work.status==='waiting')return['Waiting',details||work.detail||'Waiting for a project decision or cloud capacity.','need'];
+  if(!au.enabled)return['Free','Autonomous staff is paused.','off'];
+  if(!au.inWindow)return['Free','Outside scheduled staff hours.','off'];
+  if(au.capacityWaitSeconds)return['Free','Ready. The next autonomous pass starts in about '+Math.ceil(au.capacityWaitSeconds/60)+' min.','busy'];
+  const when=work.updated?(' Last update '+timeET(work.updated)+'.'):'';
+  return['Free',details||('Ready for the next assignment.'+when),'busy'];
+}
 function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S.activity.filter(a=>a.status==='draft').length;
-  if(!S.authorized)items.push(['need','Google sign-in needed','Run google_mail_auth.py on the Mac.','settings']);
+  if(!S.authorized)items.push(['need','Google sign-in needed','Run google_mail_auth.py on the Windows PC.','settings']);
   if(S.enabled&&!S.monitor)items.push(['need','Monitor is not running','Background monitoring is enabled but stopped.','settings']);
   if(bad)items.push(['need',bad+' send'+(bad>1?'s':'')+' unconfirmed','Review and dismiss, or check delivery.','activity']);
   if(drafts)items.push(['w',drafts+' outside draft'+(drafts>1?'s':'')+' to approve','These messages are not sent until you approve.','activity']);
@@ -57,7 +96,7 @@ function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S
 /* ---------- rendering ---------- */
 function render(){
   $('connection').textContent='Connected locally';
-  const hour=new Date().getHours();$('greeting').textContent=(hour<12?'Good morning':hour<18?'Good afternoon':'Good evening')+', James.';
+  const hour=hourET();$('greeting').textContent=(hour<12?'Good morning':hour<18?'Good afternoon':'Good evening')+', James.';
   if(document.activeElement!==$('cleanupDays'))$('cleanupDays').value=String(S.cleanupDays??30);
   $('mode').textContent={off:'Off',draft:'Draft',send:'Live'}[S.mode]||S.mode;
   $('modeNote').textContent=S.internalMode==='send'?'Staff + CEO automatic · outside mail follows this mode':'All mail follows this mode';
@@ -66,7 +105,7 @@ function render(){
   $('importantCc').textContent=S.importantCc||'Not configured';
   if(document.activeElement!==$('modeSelect'))$('modeSelect').value=S.mode;
   $('saveMode').disabled=false;$('start').disabled=S.monitor;$('stop').disabled=!S.managed;
-  const au=S.autonomy||{},staffWork=S.workStatus||{};$('autonomyStatus').textContent=au.running?(staffWork.detail||'Agents are working independently'):au.enabled?(au.inWindow?(au.capacityWaitSeconds?((staffWork.detail||'Usage capacity reached')+' · resumes automatically in about '+Math.ceil(au.capacityWaitSeconds/60)+' min'):'Enabled · preparing the next assignments'):'Enabled · outside scheduled hours'):'Stopped';
+  const au=S.autonomy||{},staffWork=S.workStatus||{};const waitDetail=staffWork.status==='waiting'&&staffWork.detail;$('autonomyStatus').textContent=au.running?(staffWork.detail||'Agents are working independently'):au.enabled?(au.inWindow?(au.capacityWaitSeconds?((waitDetail||staffWork.detail||'Cloud capacity is temporarily unavailable')+' · resumes automatically in about '+Math.ceil(au.capacityWaitSeconds/60)+' min'):(waitDetail||'Enabled · preparing the next assignments')):'Enabled · outside scheduled hours'):'Stopped';
   if(!autonomyReady){$('autoEnabled').checked=!!au.enabled;$('autoStart').value=au.start||'';$('autoStop').value=au.stop||'';$('autoObjective').value=au.objective||'';autonomyReady=true}
   $('stopAutonomy').disabled=!au.enabled&&!au.running;
   const items=attention();$('attnCount').textContent=items.length;
@@ -77,24 +116,30 @@ function render(){
   $('team').replaceChildren(...S.agents.map(a=>{const[st,txt]=agentState(a.name);const b=el('button','ag'+(a.name===agent?' sel':''));
     const av=el('div','av',a.name[0]);av.append(el('i',st));const t=el('div');t.append(el('b','',a.name),el('small','',a.role+' · '+txt));b.append(av,t);b.onclick=()=>{pickAgent(a.name);toggleChat(true)};return b}));
   $('agents').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role),el('small','',a.email));return c}));
+  if($('agentActivity'))$('agentActivity').replaceChildren(...S.agents.map(a=>{const [state,detail,level]=liveAgentState(a.name);const c=el('article','card');c.append(el('b','',a.name),el('small',level==='live'?'ok':'mut',state),el('p','mut',detail));return c}));
   if(!signaturesReady){$('signatureList').replaceChildren(...S.agents.map(a=>{const c=el('article','card');c.append(el('b','',a.name),el('p','mut',a.role));const input=el('textarea');input.dataset.signature=a.name;input.maxLength=1200;input.rows=6;input.value=S.signatures?.[a.name]||'';input.setAttribute('aria-label',a.name+' email signature');c.append(input);return c}));signaturesReady=true}
-  $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',new Date(a.time).toLocaleTimeString()),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
+  $('recent').replaceChildren(...S.activity.slice(0,5).map(a=>{const r=el('tr');r.append(el('td','',timeET(a.time)),el('td','',a.subject||'(No subject)'),el('td','',a.status));return r}));
   if(!reportProject||!S.reportProjects?.some(p=>p.id===reportProject))reportProject=S.activeReportProject||S.reportProjects?.[0]?.id||'';
   const projectOptions=S.reportProjects||[];$('reportProject').replaceChildren(...projectOptions.map(p=>{const o=el('option','',p.name);o.value=p.id;return o}));$('reportProject').value=reportProject;
+  if($('projectOverview'))$('projectOverview').value=(S.projectOverviews||{})[reportProject]||'';
   renderOutbox();renderReports();renderFiles();
   const ws=S.integrations?.workspace||{},wsLabels={connected:'Connected'+(ws.account?' as '+ws.account:'')+' · Workspace actions are automatic',authorizing:'Waiting for Google sign-in…',failed:ws.message||'Workspace connection needs attention',not_connected:'Google Workspace sign-in needed'};
   $('workspaceStatus').textContent=wsLabels[ws.state]||'Google Workspace sign-in needed';
   $('connectWorkspace').textContent=ws.state==='connected'?'Reconnect':'Connect Google Workspace';
   $('checkWorkspace').disabled=ws.state!=='connected';
-  const cfTest=S.integrations?.cloudflareTest||{};$('cloudflareStatus').textContent=S.integrations?.cloudflare?(S.integrations.freePlan?(cfTest.state==='connected'?'Connected · live image generation verified':'Configured · ready for a live test'):'Configured · confirm Free plan to enable designs'):'Enter credentials on this Mac';
+  const cfTest=S.integrations?.cloudflareTest||{};$('cloudflareStatus').textContent=S.integrations?.cloudflare?(S.integrations.freePlan?(cfTest.state==='connected'?'Connected · live image generation verified':'Configured · ready for a live test'):'Configured · confirm Free plan to enable designs'):'Enter credentials on this Windows PC';
   if(document.activeElement!==$('cfFree'))$('cfFree').checked=!!S.integrations?.freePlan;
   const tvTest=S.integrations?.tavilyTest||{};$('tavilyStatus').textContent=S.integrations?.tavily?(tvTest.state==='connected'?'Connected · live web search verified':'Configured · ready for a live test'):'Enter a Tavily API key to give every agent current web search.';
-  $('testTavily').disabled=!S.integrations?.tavily;
+  $('squareStatus').textContent=S.integrations?.square?('Configured · '+(S.integrations.squareEnvironment||'sandbox')+' catalog ready for a live test.'):'Connect Square Sandbox first. Jordan will publish approved products only after a successful test.';
+  $('squareEnvironment').value=S.integrations?.squareEnvironment||'sandbox';
+$('testTavily').disabled=!S.integrations?.tavily;
   $('wifiUrl').textContent=S.wifi?.enabled?S.wifi.url:'Wi-Fi access has not been enabled.';
   if(S.wifi?.cloud){$('accessTitle').textContent='Secure cloud access';$('accessCertificate').hidden=true;$('showWifiPassword').hidden=true}else{$('accessTitle').textContent='Wi-Fi access';$('accessCertificate').hidden=false;$('showWifiPassword').hidden=false}
   $('telegramStatus').textContent=S.telegram?.configured?(S.telegram.enabled?'Enabled':'Disabled')+' · '+S.telegram.paired+' paired':'Token needed';
   if(document.activeElement!==$('telegramEnabled'))$('telegramEnabled').checked=!!S.telegram?.enabled;
-  if($('mailboxSelect').options.length===1){$('mailboxSelect').replaceChildren(...S.mailboxes.map(m=>{const o=el('option','',m.label+(m.email?' — '+m.email:''));o.value=m.name;return o}));const initial=new URLSearchParams(location.search).get('mailbox');if(S.mailboxes.some(m=>m.name===initial))$('mailboxSelect').value=initial;}
+  for(const name of ['Morgan','Avery','Jordan','Cameron']){const state=S.telegram?.agents?.[name]||{},key='telegram'+name;if(document.activeElement!==$(key+'Enabled'))$(key+'Enabled').checked=!!state.enabled;$(key+'Status').textContent=state.configured?(state.enabled?'Enabled':'Saved')+' · '+(state.paired||0)+' paired':'Token needed'}
+  const brief=S.telegram?.dailyBrief||{};if(document.activeElement!==$('telegramDailyBriefChat'))$('telegramDailyBriefChat').value=brief.chat||'';if(document.activeElement!==$('telegramDailyBriefTime'))$('telegramDailyBriefTime').value=brief.time||'09:00';
+  const discord=S.discord||{},discordState=discord.state||{};$('discordStatus').textContent=discord.configured?(discord.enabled?(discordState.connected?'Connected':'Enabled · waiting for Discord'):'Saved · disabled'):'Token needed';for(const [field,value] of Object.entries({discordGuild:discord.guild,discordStaffChannel:discord.staffChannel,discordRequestsChannel:discord.requestsChannel,discordDailyBriefChannel:discord.dailyBriefChannel})){if(document.activeElement!==$(field))$(field).value=value||''}if(document.activeElement!==$('discordEnabled'))$('discordEnabled').checked=!!discord.enabled;for(const name of ['Morgan','Avery','Jordan','Cameron']){const info=discord.agents?.[name]||{},key='discord'+name;if(document.activeElement!==$(key+'Channel'))$(key+'Channel').value=info.channel||''}  if($('mailboxSelect').options.length===1){$('mailboxSelect').replaceChildren(...S.mailboxes.map(m=>{const o=el('option','',m.label+(m.email?' — '+m.email:''));o.value=m.name;return o}));const initial=new URLSearchParams(location.search).get('mailbox');if(S.mailboxes.some(m=>m.name===initial))$('mailboxSelect').value=initial;}
   $('sendReply').textContent=S.mode==='send'?'Send reply':'Save for approval';
   showPage()}
 
@@ -110,12 +155,12 @@ function renderOutbox(){
   const rows=done.map(a=>{const r=el('tr');const who=el('td','',a.sender.split('|')[0].trim());who.append(el('small','',a.to));
     const m=el('td');const b=el('button','',a.subject||'(No subject)');b.onclick=()=>detail(a.subject,a.sender+' → '+a.to,a.body);m.append(b);
     const s=el('td');s.append(el('span','tg','Accepted'),el('small','',a.receipt?a.receipt.label:'Confirmation not checked'));
-    r.append(el('td','',new Date(a.time).toLocaleString()),who,m,s);return r});
+    r.append(el('td','',dateTimeET(a.time)),who,m,s);return r});
   if(!rows.length){const r=el('tr'),c=el('td','','Nothing sent yet.');c.colSpan=4;r.append(c);rows.push(r)}
   $('rows').replaceChildren(...rows)}
 
 function draftCard(a){
-  const c=el('article','draftCard'),h=el('div','dh');h.append(el('b','',a.subject||'(No subject)'),el('small','',a.sender.split('|')[0].trim()+' → '+a.to+' · '+new Date(a.time).toLocaleString()));
+  const c=el('article','draftCard'),h=el('div','dh');h.append(el('b','',a.subject||'(No subject)'),el('small','',a.sender.split('|')[0].trim()+' → '+a.to+' · '+dateTimeET(a.time)));
   const p=el('p','preview',a.body.slice(0,400)),act=el('div','buttons'),working=busy.has(a.id);
   const ok=el('button','btn sm',working?'Sending…':'Approve & send');ok.disabled=working;ok.onclick=()=>approveDraft(a);
   const pv=el('button','btn g sm','Preview');pv.onclick=()=>detail(a.subject,a.sender+' → '+a.to,a.body,[approveBtn(a)]);
@@ -137,7 +182,7 @@ function renderReports(){
   const names=['all',...new Set(S.agents.map(a=>a.name)),'Unassigned'];
   $('reportFilters').replaceChildren(...names.map(n=>{const b=el('button',n===repFilter?'on':'',n==='all'?'All':n);b.onclick=()=>{repFilter=n;renderReports()};return b}));
   const list=S.reports.map((r,i)=>[r,i]).filter(([r])=>r.project===reportProject&&(repFilter==='all'||r.agent===repFilter));
-  const date=v=>v?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(new Date(v)):'';
+  const date=v=>v?dateTimeET(v):'';
   $('reportList').replaceChildren(...(list.length?list.map(([r,i])=>{const row=el('div','reportItem'),b=el('button','m'+(i===repIdx?' on':''));b.append(el('b','',r.name),el('small','',r.agent+' · Edited '+date(r.edited)));b.onclick=()=>{repIdx=i;renderReports()};const d=el('button','reportDelete','×');d.title='Delete report';d.setAttribute('aria-label','Delete '+r.name);d.onclick=()=>removeReport(r);row.append(b,d);return row}):[el('p','empty','No saved reports for this selection yet.')]));
   const selected=repIdx!==null&&S.reports[repIdx]?.project===reportProject?S.reports[repIdx]:null;
   $('reportMeta').hidden=!selected;
@@ -145,6 +190,7 @@ function renderReports(){
   renderReport(selected?selected.body:'Select a report.')}
 async function exportReport(report){$('exportReport').disabled=true;try{const r=await api('export-report',{id:report.id});toast(r.message);if(r.url)window.open(r.url,'_blank','noopener');sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('exportReport').disabled=false}}
 on('reportProject','change',async()=>{const chosen=$('reportProject').value;if(!chosen)return;try{const r=await api('report-project',{name:chosen});reportProject=r.project;repIdx=null;$('projectNotice').textContent=r.message;renderReports();sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('saveProjectOverview','click',async()=>{try{const r=await api('project-overview',{project:reportProject,body:$('projectOverview').value.trim()});toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('createProject','click',async()=>{const name=$('newProjectName').value.trim();if(!name){toast('Enter a project name.','warn');return}$('createProject').disabled=true;try{const r=await api('report-project',{name});reportProject=r.project;repIdx=null;$('newProjectName').value='';$('projectNotice').textContent=r.message;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('createProject').disabled=false}});
 async function removeReport(report){if(!await sure('Delete “'+report.name+'”? This removes the report file from this dashboard and cannot be undone.','Delete report'))return;try{const r=await api('delete-report',{id:report.id,confirm:true});repIdx=null;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}}
 on('deleteProject','click',async()=>{const project=S.reportProjects?.find(p=>p.id===reportProject);if(!project)return;if(!await sure('Delete the project “'+project.name+'” and every report inside it? This cannot be undone.','Delete project'))return;try{const r=await api('delete-project',{project:reportProject,confirm:true});reportProject=r.project;repIdx=null;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
@@ -184,7 +230,7 @@ async function openMail(id){
   if(uploading){toast('Wait for attachments to finish uploading.','warn');return}
   if(opened?.id!==id&&$('replyBody').value.trim()&&!await sure('Discard your unsaved reply and open another email?'))return;
   const version=++readVersion;$('inboxNotice').textContent='Opening email…';
-  try{const message=await api('message',{id});if(version!==readVersion)return;opened=message;replyId=crypto.randomUUID();replyAttachments=[];showAttachments('reply');
+  try{const message=await api('message',{id});if(version!==readVersion)return;opened=message;replyId=requestId();replyAttachments=[];showAttachments('reply');
     $('mailSubject').textContent=opened.subject||'(No subject)';$('mailMeta').textContent=opened.from+' → '+opened.to+' · '+opened.date;$('mailBody').textContent=opened.body;
     const files=opened.attachmentDetails||[];$('mailAttachments').replaceChildren(...files.map(f=>{const a=el('a','fileChip',f.name+' · '+Math.ceil(f.size/1024)+' KB');a.href='/api/attachment?id='+encodeURIComponent(id)+'&part='+encodeURIComponent(f.part);return a}));
     $('replyTo').textContent='→ '+opened.replyTo;const box=$('mailboxSelect').value;$('replySender').value=SENDERS.includes(box)?box:(box==='Jaunee'?'Owner':(S.agents.some(a=>a.name===agent)?agent:'Owner'));
@@ -244,11 +290,11 @@ async function sendReply(){const body=$('replyBody').value.trim();if(!opened||!b
     $('replyBody').value='';replyAttachments=[];showAttachments('reply');$('draftTag').hidden=true;sig='';await refresh()}
   catch(e){toast(e.message+' If delivery is uncertain, check the Outbox before retrying.','bad');$('sendReply').disabled=false}}
 on('sendReply','click',sendReply);
-on('replyBody','input',()=>{if($('sendReply').disabled&&!drafting){$('sendReply').disabled=false;replyId=crypto.randomUUID()}});
+on('replyBody','input',()=>{if($('sendReply').disabled&&!drafting){$('sendReply').disabled=false;replyId=requestId()}});
 on('replyBody','keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();sendReply()}});
 
 /* ---------- compose ---------- */
-on('composeMail','click',()=>{composeId=crypto.randomUUID();composeAttachments=[];showAttachments('compose');const b=$('mailboxSelect').value;$('composeSender').value=SENDERS.includes(b)?b:'Owner';
+on('composeMail','click',()=>{composeId=requestId();composeAttachments=[];showAttachments('compose');const b=$('mailboxSelect').value;$('composeSender').value=SENDERS.includes(b)?b:'Owner';
   ['composeTo','composeSubject','composeBody'].forEach(i=>$(i).value='');$('sendCompose').disabled=false;$('sendCompose').textContent=S.mode==='draft'?'Save for approval':'Send email';$('composeDetail').showModal()});
 on('composeClose','click',()=>$('composeDetail').close());
 on('sendCompose','click',async()=>{if(!$('composeTo').checkValidity()||!$('composeSubject').value.trim()||!$('composeBody').value.trim()){toast('Enter a valid recipient, subject, and message.','warn');return}
@@ -269,29 +315,52 @@ on('saveAutonomy','click',async()=>{try{const r=await api('autonomy',autonomyDat
 on('runAutonomy','click',async()=>{if(!await sure('Start all four agents now? Groq pacing will manage request and token capacity.','Start now'))return;try{const r=await api('autonomy',autonomyData(true,true));autonomyReady=false;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('stopAutonomy','click',async()=>{if(!await sure('Stop autonomous staff and disable future scheduled work?','Stop staff'))return;try{await api('autonomy',autonomyData(false,false));autonomyReady=false;toast('Autonomous staff stopped.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('showWifiPassword','click',async()=>{try{$('wifiPassword').textContent=(await api('wifi-password',{})).password}catch(e){$('wifiPassword').textContent=e.message}});
-on('saveTelegram','click',async()=>{try{await api('telegram',{token:$('telegramToken').value,enabled:$('telegramEnabled').checked});$('telegramToken').value='';sig='';await refresh();toast('Telegram settings saved.')}catch(e){toast(e.message,'bad')}});
+on('saveModelSettings','click',async()=>{const button=$('saveModelSettings');button.disabled=true;
+  const settings={};for(const [id,prefix] of [['cerebras','CEREBRAS'],['gemini','GEMINI'],['mistral','MISTRAL'],['openrouter','OPENROUTER']]){settings[prefix+'_API_KEY']=$(id+'Key').value.trim();settings[prefix+'_MODEL']=$(id+'Model').value.trim()}
+  settings.GEMINI_FREE_TIER_CONFIRMED=String($('geminiFree').checked);settings.MISTRAL_FREE_TIER_CONFIRMED=String($('mistralFree').checked);
+  try{const r=await api('model-settings',{settings});$('modelSettingsNotice').textContent=r.message;for(const id of ['cerebras','gemini','mistral','openrouter'])$(id+'Key').value='';modelSettingsReady=false;sig='';await refresh()}
+  catch(e){$('modelSettingsNotice').textContent=e.message}finally{button.disabled=false}});
+on('testDiscord','click',async()=>{const b=$('testDiscord');b.disabled=true;try{const r=await api('discord',{token:$('discordToken').value.trim(),test:true});toast(r.message)}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});
+on('createDiscordWorkspace','click',async()=>{const b=$('createDiscordWorkspace');b.disabled=true;try{const r=await api('discord-provision',{token:$('discordToken').value.trim(),guild:$('discordGuild').value.trim()});$('discordStaffChannel').value=r.layout.staff;$('discordRequestsChannel').value=r.layout.requests;$('discordDailyBriefChannel').value=r.layout.briefs;for(const [name,id] of Object.entries(r.layout.agents))$('discord'+name+'Channel').value=id;toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});on('saveDiscord','click',async()=>{const b=$('saveDiscord');b.disabled=true;const names=['Morgan','Avery','Jordan','Cameron'],agentChannels={},agentTokens={};for(const name of names){agentChannels[name]=$('discord'+name+'Channel').value.trim();agentTokens[name]=''}try{const r=await api('discord',{token:$('discordToken').value.trim(),enabled:$('discordEnabled').checked,guild:$('discordGuild').value.trim(),staffChannel:$('discordStaffChannel').value.trim(),requestsChannel:$('discordRequestsChannel').value.trim(),dailyBriefChannel:$('discordDailyBriefChannel').value.trim(),agentChannels,agentTokens});$('discordToken').value='';sig='';await refresh();toast(r.message)}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});on('testTelegram','click',async()=>{const button=$('testTelegram');button.disabled=true;try{const r=await api('telegram-check',{token:$('telegramToken').value.trim()});toast(r.message)}catch(e){toast(e.message,'bad')}finally{button.disabled=false}});
+on('saveTelegram','click',async()=>{const button=$('saveTelegram');button.disabled=true;try{const r=await api('telegram',{token:$('telegramToken').value.trim(),enabled:$('telegramEnabled').checked});$('telegramToken').value='';sig='';await refresh();toast(r.message)}catch(e){toast(e.message,'bad')}finally{button.disabled=false}});
 on('pairTelegram','click',async()=>{try{const r=await api('telegram-pair',{});$('telegramPairCode').textContent='In your bot’s private chat, send /pair '+r.code+' within 10 minutes. This grants access to the shared staff conversations.'}catch(e){$('telegramPairCode').textContent=e.message}});
+on('saveTelegramAgents','click',async()=>{const button=$('saveTelegramAgents');button.disabled=true;const names=['Morgan','Avery','Jordan','Cameron'],tokens={},enabled={};for(const name of names){const key='telegram'+name;tokens[name]=$(key+'Token').value.trim();enabled[name]=$(key+'Enabled').checked}try{const r=await api('telegram-agents',{tokens,enabled});for(const name of names)$('telegram'+name+'Token').value='';sig='';await refresh();toast(r.message)}catch(e){toast(e.message,'bad')}finally{button.disabled=false}});
+for(const name of ['Morgan','Avery','Jordan','Cameron'])on('pairTelegram'+name,'click',async()=>{try{const r=await api('telegram-agent-pair',{agent:name});$('telegramAgentPairCode').textContent='In '+name+'’s bot private chat, send /pair '+r.code+' within 10 minutes.'}catch(e){$('telegramAgentPairCode').textContent=e.message}});
+on('saveTelegramDailyBrief','click',async()=>{try{const r=await api('telegram-daily-brief',{chat:$('telegramDailyBriefChat').value.trim(),time:$('telegramDailyBriefTime').value,test:false});toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}});
+on('testTelegramDailyBrief','click',async()=>{const b=$('testTelegramDailyBrief');b.disabled=true;try{const r=await api('telegram-daily-brief',{chat:$('telegramDailyBriefChat').value.trim(),time:$('telegramDailyBriefTime').value,test:true});toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});
 
 /* ---------- chat (shared with Telegram) ---------- */
 async function loadChat(){if(!S||chatBusy)return;const who=agent;
   try{const r=await api('chat-history',{agent:who});if(who!==agent||chatBusy)return;
-    $('chatHistory').replaceChildren(...(r.messages.length?r.messages.map(m=>{const b=el('article','b '+m.role);b.append(el('p','',m.body));for(const raw of new Set(m.body.match(/(?:https:\/\/docs\.google\.com\/[^\s"<>]+|\/api\/artifact\?id=[a-f0-9]{32}|\/activity)/g)||[])){const a=el('a','','Open result');a.href=raw;a.target=raw==='/activity'?'_self':'_blank';a.rel='noopener';b.append(a)}b.append(el('small','',(m.role==='user'?'You':who)+' · '+m.source+' · '+new Date(m.created.replace(' ','T')+'Z').toLocaleTimeString()));return b}):[el('p','empty','Start a conversation with '+who+'.')]));
+    $('chatHistory').replaceChildren(...(r.messages.length?r.messages.map(m=>{const b=el('article','b '+m.role);b.append(el('p','',m.body));for(const raw of new Set(m.body.match(/(?:https:\/\/docs\.google\.com\/[^\s"<>]+|\/api\/artifact\?id=[a-f0-9]{32}|\/activity)/g)||[])){const a=el('a','','Open result');a.href=raw;a.target=raw==='/activity'?'_self':'_blank';a.rel='noopener';b.append(a)}b.append(el('small','',(m.role==='user'?'You':who)+' · '+m.source+' · '+timeET(m.created.replace(' ','T')+'Z')));return b}):[el('p','empty','Start a conversation with '+who+'.')]));
     $('chatHistory').scrollTop=1e6}catch(e){$('chatNotice').textContent=e.message}}
-async function chatCall(who,body){
+let chatAttachments=[],chatUploading=false;
+function showChatAttachments(){ $('chatFileList').replaceChildren(...chatAttachments.map((file,index)=>{const button=el('button','fileChip',file.name+' ×');button.type='button';button.disabled=chatBusy;button.onclick=()=>{chatAttachments.splice(index,1);showChatAttachments()};return button})) }
+on('chatFiles','change',async()=>{
+  const input=$('chatFiles'),files=[...input.files];if(chatBusy||chatUploading)return;
+  if(files.length+chatAttachments.length>5){toast('Choose up to five attachments.','warn');input.value='';return}
+  chatUploading=true;input.disabled=true;$('sendChat').disabled=true;
+  try{for(const file of files){if(file.size>10000000)throw Error('Choose files up to 10 MB.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(Error('File could not be read.'));reader.readAsDataURL(file)});chatAttachments.push(await api('upload',{name:file.name,data}));showChatAttachments()}}
+  catch(e){toast(e.message,'bad')}finally{input.value='';chatUploading=false;input.disabled=false;$('sendChat').disabled=chatBusy}
+});
+async function chatCall(who,body,attachments=[]){
   chatBusy=true;$('sendChat').disabled=true;$('chatNotice').textContent='';
   if(who===agent){const h=$('chatHistory');h.querySelector('.empty')?.remove();const u=el('article','b user');u.append(el('p','',body));const t=el('article','b typing');t.append(el('span'),el('span'),el('span'));h.append(u,t);h.scrollTop=1e6}
-  try{return(await api('chat',{agent:who,body:body.slice(0,4000),requestId:crypto.randomUUID()})).answer}
+  try{return(await api('chat',{agent:who,body:body.slice(0,4000),requestId:requestId(),attachments:attachments.map(f=>f.id)})).answer}
   finally{chatBusy=false;$('sendChat').disabled=false;await loadChat()}}
-async function askAgent(text){const body=text.trim();if(!body||chatBusy)return;$('chatBody').value='';
-  try{const a=await chatCall(agent,body);if(FAILED.test(String(a)))toast('The agent could not respond. Check Groq connectivity and quota.','bad')}catch(e){$('chatBody').value=body;toast(e.message,'bad')}}
+async function askAgent(text){const body=text.trim();if(!body||chatBusy||chatUploading)return;$('chatBody').value='';
+  const files=[...chatAttachments];
+  try{const a=await chatCall(agent,body,files);if(FAILED.test(String(a)))toast('The agent could not respond. Check cloud connections and quotas.','bad');else{chatAttachments=[];showChatAttachments()}}catch(e){$('chatBody').value=body;toast(e.message,'bad')}}
 function toggleChat(open){$('chatPanel').hidden=!open;$('toggleChat').setAttribute('aria-expanded',String(open));if(open){loadChat();$('chatBody').focus()}}
 on('toggleChat','click',()=>toggleChat($('chatPanel').hidden));on('closeChat','click',()=>toggleChat(false));
 on('heroChat','click',()=>toggleChat(true));
 on('checkSmtp','click',async()=>{$('checkSmtp').disabled=true;try{$('smtpNotice').textContent=(await api('smtp-check',{})).message}catch(e){$('smtpNotice').textContent=e.message}finally{$('checkSmtp').disabled=false}});
-on('connectWorkspace','click',async()=>{try{$('workspaceNotice').textContent=(await api('workspace-authorize',{})).message}catch(e){$('workspaceNotice').textContent=e.message}});
+on('connectWorkspace','click',async()=>{try{const r=await api('workspace-authorize',{});$('workspaceNotice').textContent=r.message;if(r.url)window.open(r.url,'_blank','noopener')}catch(e){$('workspaceNotice').textContent=e.message}});
 on('checkWorkspace','click',async()=>{$('checkWorkspace').disabled=true;try{$('workspaceNotice').textContent=(await api('workspace-check',{})).message;sig='';await refresh()}catch(e){$('workspaceNotice').textContent=e.message}finally{$('checkWorkspace').disabled=false}});
 on('saveCloudflare','click',async()=>{try{await api('cloudflare',{account:$('cfAccount').value.trim(),token:$('cfToken').value.trim(),freePlan:$('cfFree').checked});$('cfToken').value='';toast('Cloudflare credentials saved locally.');sig='';await refresh()}catch(e){toast(e.message,'bad')}});
 on('testCloudflare','click',async()=>{$('testCloudflare').disabled=true;try{toast((await api('cloudflare-check',{})).message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('testCloudflare').disabled=false}});
+on('saveSquare','click',async()=>{const b=$('saveSquare');b.disabled=true;try{const r=await api('square',{token:$('squareToken').value.trim(),environment:$('squareEnvironment').value});$('squareToken').value='';toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});
+on('testSquare','click',async()=>{const b=$('testSquare');b.disabled=true;try{const r=await api('square-check',{});toast(r.message+' Locations: '+r.locations+'.')}catch(e){toast(e.message,'bad')}finally{b.disabled=false}});
 on('saveTavily','click',async()=>{$('saveTavily').disabled=true;try{const r=await api('tavily',{token:$('tavilyToken').value.trim()});$('tavilyToken').value='';toast(r.message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('saveTavily').disabled=false}});
 on('testTavily','click',async()=>{$('testTavily').disabled=true;try{toast((await api('tavily-check',{})).message);sig='';await refresh()}catch(e){toast(e.message,'bad')}finally{$('testTavily').disabled=false}});
 const signatureValues=()=>Object.fromEntries([...document.querySelectorAll('[data-signature]')].map(x=>[x.dataset.signature,x.value]));
@@ -315,6 +384,6 @@ on('paletteInput','keydown',e=>{const n=paletteDraw().length;if(!n)return;if(e.k
   else if(e.key==='Enter'){e.preventDefault();const c=paletteDraw()[pal];if(c){$('palette').close();c[2]()}}});
 addEventListener('keydown',e=>{const t=e.target.tagName;if((e.key==='k'&&(e.ctrlKey||e.metaKey))||(e.key==='/'&&!['INPUT','TEXTAREA','SELECT'].includes(t)&&!document.querySelector('dialog[open]'))){e.preventDefault();openPalette()}});
 
-refresh().then(()=>{$('cw').textContent=agent;syncDrafter();loadChat()});
-setInterval(refresh,5000);setInterval(()=>{if(!$('chatPanel').hidden&&!chatBusy&&!drafting)loadChat()},10000);
+refresh().then(()=>{if(!S)return;$('cw').textContent=agent;syncDrafter();loadChat()});
+setInterval(refresh,15000);setInterval(()=>{if(!$('chatPanel').hidden&&!chatBusy&&!drafting)loadChat()},10000);
 })();

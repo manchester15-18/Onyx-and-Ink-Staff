@@ -6,7 +6,11 @@ import re
 import textwrap
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
+from report_format import normalize_report
+
+BUSINESS_TZ = ZoneInfo('America/New_York')
 
 REFERENCE_TERMS = (
     "terms and conditions", "terms of service", "return policy", "refund policy",
@@ -51,21 +55,30 @@ def _save(root, data):
     temporary.write_text(json.dumps(data, indent=2) + "\n");temporary.chmod(0o600);temporary.replace(path)
 
 
-def metadata(root, path):
-    root = Path(root).resolve();path = Path(path).resolve();key = str(path.relative_to(root / "reports"))
-    stat = path.stat();body = path.read_text()
-    created_stamp = getattr(stat, "st_birthtime", stat.st_ctime)
-    lock_path = _registry_path(root).with_suffix(".lock");lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        data = _load(root);item = data.get(key, {}) if isinstance(data.get(key), dict) else {}
-        before=dict(item)
-        item["title"] = assignment_name(path, body)
-        item.setdefault("created", datetime.fromtimestamp(created_stamp, timezone.utc).isoformat())
-        item["edited"] = datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat()
-        if item!=before:data[key] = item;_save(root, data)
-    return dict(item)
+def metadata_many(root, paths):
+    """Read report metadata in one lock and write the registry only when it changed."""
+    root=Path(root).resolve();reports=(root/'reports').resolve();resolved=[]
+    for path in paths:
+        path=Path(path).resolve()
+        if path.is_relative_to(reports) and path.suffix.lower()=='.md' and path.is_file():resolved.append(path)
+    lock_path=_registry_path(root).with_suffix('.lock');lock_path.parent.mkdir(parents=True,exist_ok=True)
+    with lock_path.open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX);data=_load(root);changed=False;result={}
+        for path in resolved:
+            key=str(path.relative_to(reports));stat=path.stat();body=path.read_text();created_stamp=getattr(stat,'st_birthtime',stat.st_ctime)
+            item=data.get(key,{}) if isinstance(data.get(key),dict) else {};before=dict(item)
+            item['title']=assignment_name(path,body)
+            item.setdefault('created',datetime.fromtimestamp(created_stamp,timezone.utc).isoformat())
+            item['edited']=datetime.fromtimestamp(stat.st_mtime,timezone.utc).isoformat()
+            if item!=before:data[key]=item;changed=True
+            result[key]=dict(item)
+        if changed:_save(root,data)
+    return result
 
+
+def metadata(root, path):
+    root=Path(root).resolve();path=Path(path).resolve();key=str(path.relative_to(root/'reports'))
+    return metadata_many(root,[path])[key]
 
 def is_reference_report(title, body):
     haystack = (str(title) + "\n" + str(body)).lower()
@@ -73,9 +86,20 @@ def is_reference_report(title, body):
 
 
 def _document_text(title, meta, body):
-    created = datetime.fromisoformat(meta["created"]).astimezone().strftime("%B %-d, %Y at %-I:%M %p")
-    edited = datetime.fromisoformat(meta["edited"]).astimezone().strftime("%B %-d, %Y at %-I:%M %p")
-    return f"{title}\n\nCreated: {created}\nLast edited: {edited}\n\n{body.strip()}\n"
+    created = datetime.fromisoformat(meta["created"]).astimezone(BUSINESS_TZ).strftime("%B %-d, %Y at %-I:%M %p")
+    edited = datetime.fromisoformat(meta["edited"]).astimezone(BUSINESS_TZ).strftime("%B %-d, %Y at %-I:%M %p")
+    return f"{title}\n\nCreated: {created}\nLast edited: {edited}\n\n{google_document_body(body)}\n"
+
+
+def google_document_body(body):
+    """Turn dashboard Markdown into readable text for a Google Doc export."""
+    text = normalize_report(body)
+    text = re.sub(r'!\[[^]]*\]\([^)]+\)', '', text)
+    text = re.sub(r'\[([^]]+)\]\(([^)]+)\)', r'\1 (\2)', text)
+    text = re.sub(r'(?m)^#{1,6}\s+', '', text)
+    text = re.sub(r'(?m)^\s*[-*+]\s+', '\u2022 ', text)
+    text = re.sub(r'(\*\*|__|`)', '', text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip() or 'No current update saved.'
 
 
 def export_google_doc(root, identifier, force=False):
@@ -114,13 +138,21 @@ def auto_export_reference(root, path):
         return None
 
 
+def export_consolidated_project(root, project=None):
+    """Export only the stable project summary, avoiding one Drive Doc per run."""
+    from report_projects import consolidated_project_report
+    summary=consolidated_project_report(root,project)
+    result=export_google_doc(root,summary['id'],force=True)
+    return {**summary,'drive':result}
+
+
 def pdf_bytes(title, meta, markdown):
     """Build a small standards-compliant PDF without adding a runtime dependency."""
     plain = re.sub(r"!\[[^]]*\]\([^)]+\)", "", markdown)
     plain = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", plain)
     plain = re.sub(r"^#{1,6}\s+", "", plain, flags=re.M)
     plain = re.sub(r"[*_`]", "", plain)
-    stamp = lambda value: datetime.fromisoformat(value).astimezone().strftime("%b %-d, %Y %-I:%M %p")
+    stamp = lambda value: datetime.fromisoformat(value).astimezone(BUSINESS_TZ).strftime("%b %-d, %Y %-I:%M %p")
     lines = [title, "Created: " + stamp(meta["created"]), "Last edited: " + stamp(meta["edited"]), ""]
     for raw in plain.splitlines():
         lines.extend(textwrap.wrap(raw, width=92, replace_whitespace=False) or [""])

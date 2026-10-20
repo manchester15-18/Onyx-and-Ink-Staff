@@ -6,6 +6,7 @@ import re
 import smtplib
 import ssl
 import threading
+import time
 import uuid
 import fcntl
 from email import policy
@@ -138,7 +139,9 @@ class StaffMail:
         self.important_cc = important_cc
         self.signatures = signatures or {}
         self.run_id = uuid.uuid4().hex
-        self.outbox = Path(project_dir) / 'work' / 'email-outbox' / self.run_id
+        self.project_dir = Path(project_dir)
+        self.outbox = self.project_dir / 'work' / 'email-outbox' / self.run_id
+        self.coordination_path = self.project_dir / 'work' / 'staff-email-coordination.json'
         self.completed = set()
         self.reports = {}
         self.reported = set()
@@ -203,6 +206,26 @@ class StaffMail:
         with self.lock:
             return self._deliver(sender,recipients,subject,body,kind=kind,in_reply_to=in_reply_to,references=references,reply_address=reply_address,forwarded_message=forwarded_message,attachments=attachments,important=important)
 
+    def _reserve_coordination(self, sender, recipients, kind):
+        """Allow routine staff email, but never let an agent chase a coworker."""
+        staff_recipients=sorted(name for name in recipients if name in STAFF)
+        if kind not in ('message','handoff') or not staff_recipients:
+            return True
+        self.coordination_path.parent.mkdir(parents=True,exist_ok=True)
+        key=sender+'|'+','.join(staff_recipients);now=time.time();window=30*60
+        with self.coordination_path.open('a+') as stream:
+            fcntl.flock(stream,fcntl.LOCK_EX);stream.seek(0)
+            try:history=json.load(stream)
+            except (ValueError,TypeError):history={}
+            history={name:stamp for name,stamp in history.items() if isinstance(stamp,(int,float)) and now-stamp<86400}
+            previous=history.get(key)
+            if previous and now-previous<window:
+                fcntl.flock(stream,fcntl.LOCK_UN)
+                return False
+            history[key]=now;stream.seek(0);stream.truncate();json.dump(history,stream);stream.flush()
+            fcntl.flock(stream,fcntl.LOCK_UN)
+        return True
+
     def _deliver(self, sender, recipients, subject, body, *, kind="message", in_reply_to=None, references=None, reply_address=None, forwarded_message=None, attachments=None, important=False):
         if self.mode == 'off':
             return 'Staff email is disabled.'
@@ -218,6 +241,8 @@ class StaffMail:
         recipients = list(dict.fromkeys(recipients))
         if not recipients or any(name not in INTERNAL_RECIPIENTS or not valid_address(self.addresses.get(name,'')) for name in recipients):
             raise ValueError('Recipients must be James, Jaunee, Morgan, Avery, Jordan, or Cameron.')
+        if not self._reserve_coordination(sender,recipients,kind):
+            return 'Coordination email suppressed: this staff recipient was already contacted recently. Use the staff chat for updates.'
         if '\r' in subject or '\n' in subject or not subject.strip():
             raise ValueError('Email subject must be one non-empty line.')
         if self.count >= self.limit:
@@ -240,6 +265,7 @@ class StaffMail:
         message['Message-ID'] = make_msgid()
         message['Auto-Submitted'] = 'no' if kind in ('manual', 'compose') else 'auto-replied' if kind == 'reply' else 'auto-generated'
         message['X-Onyx-Ink-Kind'] = kind
+        message['X-Onyx-Ink-Sender'] = sender
         message['X-Onyx-Ink-Run-ID'] = self.run_id
         message['X-Auto-Response-Suppress'] = 'All'
         if in_reply_to:
@@ -324,23 +350,28 @@ class StaffMail:
         user, password = self.credentials.get(sender, ('', ''))
         stage = "connection"
         try:
-            context = ssl.create_default_context()
-            if self.security == 'ssl':
-                client = smtplib.SMTP_SSL(self.host, self.port, timeout=30, context=context)
-            else:
-                client = smtplib.SMTP(self.host, self.port, timeout=30)
-            with client:
-                if self.security == 'starttls':
-                    client.ehlo()
-                    client.starttls(context=context)
-                    client.ehlo()
-                stage = "authentication"
-                if self.oauth:
-                    self.oauth.smtp_login(client)
+            # The autonomous staff process can complete several reports at once.
+            # Serialize Gmail sessions across processes to avoid connection resets.
+            lock_path=Path(self.outbox).parents[1]/'smtp-submit.lock';lock_path.parent.mkdir(exist_ok=True)
+            with lock_path.open('a') as lock:
+                fcntl.flock(lock,fcntl.LOCK_EX)
+                context = ssl.create_default_context()
+                if self.security == 'ssl':
+                    client = smtplib.SMTP_SSL(self.host, self.port, timeout=30, context=context)
                 else:
-                    client.login(user, password)
-                stage = "message submission"
-                refused = client.send_message(message, from_addr=self.addresses[sender], to_addrs=envelope)
+                    client = smtplib.SMTP(self.host, self.port, timeout=30)
+                with client:
+                    if self.security == 'starttls':
+                        client.ehlo()
+                        client.starttls(context=context)
+                        client.ehlo()
+                    stage = "authentication"
+                    if self.oauth:
+                        self.oauth.smtp_login(client)
+                    else:
+                        client.login(user, password)
+                    stage = "message submission"
+                    refused = client.send_message(message, from_addr=self.addresses[sender], to_addrs=envelope)
             status = 'partially-accepted' if refused else 'accepted'
             path.with_suffix('.status').write_text(status + '\n')
             return f'Email {status} by mail server; inbox delivery is not verified.'
@@ -380,16 +411,31 @@ class StaffMail:
         # failures, and questions that require human input.
         self.reported.update(self.reports)
 
-    def failure(self, reason):
-        # Callers supply a fixed explanation, never raw exceptions or credentials.
+    def failure(self, reason, diagnostic=''):
+        """Send one concise, credential-safe autonomous-staff failure notice daily."""
         if self.mode == 'off':
             return
+        detail=re.sub(r'(?i)(?:bearer\s+|api[_ -]?key[=:]\s*|token[=:]\s*)[^\s,;]+','[REDACTED]',str(diagnostic)).replace('\n',' ')[:280]
+        log='\n\nTroubleshooting log:\n- Time: '+time.strftime('%Y-%m-%d %I:%M %p %Z')+'\n- Category: autonomous staff run\n- Detail: '+(detail or 'No additional provider detail was available.')+'\n- Recovery: The dashboard will retry only when its current guard allows it. Review Dashboard → Activity for the latest status.'
+        body=str(reason).strip()+log
+        path=self.project_dir/'work'/'staff-failure-notice.json';path.parent.mkdir(exist_ok=True)
+        now=time.time()
+        with path.open('a+',encoding='utf-8') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX);lock.seek(0)
+            try:state=json.load(lock)
+            except (ValueError,TypeError):state={}
+            last=state.get('sent_at',0)
+            if isinstance(last,(int,float)) and now-last<86400:
+                fcntl.flock(lock,fcntl.LOCK_UN)
+                print('Failure notice suppressed: a staff-run alert was already sent in the last 24 hours.')
+                return
+            lock.seek(0);lock.truncate();json.dump({'sent_at':now,'reason':str(reason)[:240],'diagnostic':detail},lock);lock.flush()
+            fcntl.flock(lock,fcntl.LOCK_UN)
         self.finish()
         try:
-            print(self.deliver('Morgan', ['Owner'], 'Morgan: staff run needs attention', reason, kind='failure', important=True))
+            print(self.deliver('Morgan', ['Owner'], 'Morgan: staff run needs attention', body, kind='failure', important=True))
         except (ValueError, OSError):
             print('Failure notification could not be prepared.')
-
     def tool_for(self, sender, allow_owner=True):
         from crewai.tools import tool
         @tool(f'Email from {sender}')
