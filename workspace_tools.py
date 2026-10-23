@@ -130,9 +130,9 @@ class Workspace:
             if index==1:
                 textbox(title_box,slide,title,64,112,720,72,42,palette['paper'],True)
                 textbox(body_box,slide,body,68,214,550,150,20,palette['muted'])
-                textbox(label_box,slide,'CUSTOM GIFT PUSH',68,80,240,24,12,palette['gold'],True)
+                textbox(label_box,slide,'ONYX & INK',68,80,240,24,12,palette['gold'],True)
             else:
-                textbox(label_box,slide,'CUSTOM GIFT PUSH  /  '+str(index).zfill(2),68,80,300,22,11,palette['gold'],True)
+                textbox(label_box,slide,'ONYX & INK  /  '+str(index).zfill(2),68,80,300,22,11,palette['gold'],True)
                 textbox(title_box,slide,title,64,116,690,60,34,palette['paper'],True)
                 rule='rule_'+uuid.uuid4().hex
                 operations.extend([{'createShape':{'objectId':rule,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':5,'unit':'PT'},'height':{'magnitude':248,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':68,'translateY':205,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':rule,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])

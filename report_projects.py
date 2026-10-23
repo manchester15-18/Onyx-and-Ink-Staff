@@ -6,8 +6,8 @@ import uuid
 from pathlib import Path
 from report_format import normalize_report
 
-DEFAULT_PROJECT = "custom-gift-push"
-DEFAULT_LABEL = "Custom Gift Push"
+DEFAULT_PROJECT = "onboarding"
+DEFAULT_LABEL = "Onyx & Ink Priorities"
 OVERVIEW_FILE = 'overview.md'
 
 def _overview_template(label):
