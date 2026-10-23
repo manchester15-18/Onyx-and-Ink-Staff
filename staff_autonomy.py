@@ -21,6 +21,7 @@ def report_context(root):
     """Use the active project's current reports, not stale work from other projects."""
     _,_,folder=active_project(root)
     candidates=[folder/'overview.md',folder/'consolidated-project-report.md']
+    candidates.extend(sorted(path for path in folder.glob('*.md') if path.name not in ('overview.md','consolidated-project-report.md')))
     candidates.extend(sorted((folder/'agent-reports').glob('*.md')) if (folder/'agent-reports').exists() else [])
     candidates.extend(sorted((folder/'manual').glob('**/*.md')) if (folder/'manual').exists() else [])
     sections=[]
