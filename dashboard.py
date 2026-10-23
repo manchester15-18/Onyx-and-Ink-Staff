@@ -259,12 +259,13 @@ def snapshot():
     reports=[]
     project_list=projects(ROOT)
     project_overviews={item['id']:project_overview(ROOT,item['id'])['body'] for item in project_list}
-    report_root=ROOT/'reports';registry_path=ROOT/'work'/'report-metadata.json'
-    try:registry=json.loads(registry_path.read_text())
-    except (OSError,ValueError,TypeError):registry={}
-    report_paths=[(report_root/key).resolve() for key in registry if isinstance(key,str) and (report_root/key).suffix=='.md' and 'archive' not in (report_root/key).parts and (report_root/key).is_file()]
-    if not report_paths:report_paths=list(report_root.glob('**/*.md'))
-    report_paths=sorted(report_paths,key=lambda item:item.stat().st_mtime,reverse=True)[:20]
+    report_root=ROOT/'reports'
+    # The filesystem is the source of truth. Metadata enriches a report after it
+    # is found; it must never decide which saved staff work is visible.
+    report_paths=[path.resolve() for path in report_root.rglob('*.md')
+                  if 'archive' not in path.relative_to(report_root).parts
+                  and path.relative_to(report_root).parts.count('agent-reports') <= 1]
+    report_paths=sorted(report_paths,key=lambda item:item.stat().st_mtime,reverse=True)
     report_meta=report_metadata_many(ROOT,report_paths)
     for path in report_paths:
         relative=path.relative_to(ROOT/'reports');project=relative.parts[0]

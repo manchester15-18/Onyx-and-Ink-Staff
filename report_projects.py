@@ -95,7 +95,10 @@ def save_project_overview(root, project, body):
     body=str(body or '').strip()
     if not body or len(body)>20000:raise ValueError('Enter project background, goals, and desired outcomes within 20,000 characters.')
     if not re.search(r'(?m)^#\s+',body):body='# '+label+' — Project Overview\n\n'+body
-    _write_report(folder/OVERVIEW_FILE,body)
+    path=folder/OVERVIEW_FILE
+    _write_report(path,body)
+    from report_records import metadata_many
+    metadata_many(root,[path])
     return {'project':slug,'project_name':label,'body':body}
 
 
@@ -142,6 +145,8 @@ def create_report(root,project,agent,title,body):
     path=folder/'manual'/agent.lower()/(project_slug(title)+'.md')
     if not re.search(r'(?m)^#\s+',body):body='# '+title+'\n\n'+body
     existed=path.exists();_write_report(path,body)
+    from report_records import metadata_many
+    metadata_many(root,[path])
     return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label,'updated':existed}
 
 
@@ -166,6 +171,8 @@ def consolidated_project_report(root,project=None):
             sections.extend(['','## '+role,'',body or 'No current update saved.'])
     target=folder/'consolidated-project-report.md';existing=target.exists()
     _write_report(target,'\n'.join(sections))
+    from report_records import metadata_many
+    metadata_many(root,[target])
     return {'project':slug,'project_name':label,'id':str(target.relative_to(Path(root)/'reports')),'updated':existing,'path':target}
 
 
@@ -181,31 +188,60 @@ def clean_previous_reports(root, project=None):
     return changed
 
 
+def repair_agent_report_tree(root, project):
+    """Keep one visible agent-report folder and archive old accidental nesting."""
+    slug,_,folder=ensure_project(root,project)
+    current=folder/'agent-reports';nested=current/'agent-reports'
+    current.mkdir(parents=True,exist_ok=True)
+    archived=0;recovered=0
+    if nested.is_dir():
+        archive=folder/'archive'/'legacy-agent-reports'
+        for path in sorted(nested.rglob('*.md')):
+            canonical=current/path.name
+            if canonical.exists():
+                archive.mkdir(parents=True,exist_ok=True)
+                target=archive/path.name
+                if target.exists():target=archive/(path.stem+'-'+uuid.uuid4().hex[:8]+path.suffix)
+                path.replace(target);archived+=1
+            else:
+                path.replace(canonical);recovered+=1
+        for directory in sorted(nested.rglob('*'),key=lambda item:len(item.parts),reverse=True):
+            if directory.is_dir():
+                try:directory.rmdir()
+                except OSError:pass
+        try:nested.rmdir()
+        except OSError:pass
+    return {'project':slug,'archived':archived,'recovered':recovered}
+
+
 def consolidate_assignment_reports(root,project):
     """Keep one current report per agent and move prior assignment snapshots to archive."""
     slug,label,folder=ensure_project(root,project);assignments=folder/'assignments';archive=folder/'archive'/'assignments';current=folder/'agent-reports'
     filenames=('morgan-operations.md','avery-marketing.md','jordan-web-it.md','cameron-hr-legal.md')
-    if not assignments.exists():return {'project':slug,'moved':0,'updated':0}
+    repaired=repair_agent_report_tree(root,slug)
     latest={}
-    for path in assignments.glob('*/*.md'):
-        if path.name in filenames and (path.name not in latest or path.stat().st_mtime>latest[path.name].stat().st_mtime):latest[path.name]=path
+    if assignments.exists():
+        for path in assignments.glob('*/*.md'):
+            if path.name in filenames and (path.name not in latest or path.stat().st_mtime>latest[path.name].stat().st_mtime):latest[path.name]=path
     updated=0
     for name,path in latest.items():
         target=current/name
         if not target.exists() or path.stat().st_mtime>target.stat().st_mtime:
             _write_report(target,path.read_text());updated+=1
-    moved=0;archive.mkdir(parents=True,exist_ok=True)
-    for directory in list(assignments.iterdir()):
-        if not directory.is_dir():continue
-        target=archive/directory.name
-        if target.exists():target=archive/(directory.name+'-'+uuid.uuid4().hex[:8])
-        directory.replace(target);moved+=1
-    try:assignments.rmdir()
-    except OSError:pass
+    moved=0
+    if assignments.exists():
+        archive.mkdir(parents=True,exist_ok=True)
+        for directory in list(assignments.iterdir()):
+            if not directory.is_dir():continue
+            target=archive/directory.name
+            if target.exists():target=archive/(directory.name+'-'+uuid.uuid4().hex[:8])
+            directory.replace(target);moved+=1
+        try:assignments.rmdir()
+        except OSError:pass
     from report_records import metadata_many
-    metadata_many(root,current.glob('*.md'))
+    metadata_many(root,[folder/OVERVIEW_FILE,*current.glob('*.md')])
     summary=consolidated_project_report(root,slug)
-    return {'project':slug,'moved':moved,'updated':updated,'consolidated':summary['id']}
+    return {'project':slug,'moved':moved,'updated':updated,'archived_legacy_reports':repaired['archived'],'recovered_legacy_reports':repaired['recovered'],'consolidated':summary['id']}
 
 def delete_report(root,identifier):
     report_root=(Path(root)/'reports').resolve();path=(report_root/str(identifier)).resolve()

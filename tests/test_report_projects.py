@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from report_projects import active_project, create_report, delete_project, delete_report, ensure_project, migrate_legacy_reports, projects, consolidate_assignment_reports
+from report_projects import active_project, create_report, delete_project, delete_report, ensure_project, migrate_legacy_reports, projects, consolidate_assignment_reports, repair_agent_report_tree
 
 
 class ReportProjectTests(unittest.TestCase):
@@ -32,6 +32,19 @@ class ReportProjectTests(unittest.TestCase):
             current=project/'agent-reports'/'avery-marketing.md'
             self.assertTrue(current.is_file());self.assertIn('Updated draft',current.read_text())
             self.assertEqual(result['moved'],2);self.assertFalse((project/'assignments').exists())
+
+    def test_nested_agent_reports_are_archived_without_hiding_current_reports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);_,_,project=ensure_project(root,'Holiday Launch','Holiday Launch',activate=True)
+            current=project/'agent-reports';nested=current/'agent-reports';nested.mkdir(parents=True)
+            (current/'avery-marketing.md').write_text('# Current Avery report')
+            (nested/'avery-marketing.md').write_text('# Older Avery report')
+            (nested/'jordan-web-it.md').write_text('# Recovered Jordan report')
+            result=repair_agent_report_tree(root,'holiday-launch')
+            self.assertEqual(result['archived'],1);self.assertEqual(result['recovered'],1)
+            self.assertIn('Current', (current/'avery-marketing.md').read_text())
+            self.assertTrue((current/'jordan-web-it.md').is_file())
+            self.assertFalse(nested.exists())
 
     def test_manual_reports_and_project_deletion_stay_inside_report_root(self):
         with tempfile.TemporaryDirectory() as folder:
