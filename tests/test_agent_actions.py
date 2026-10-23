@@ -55,6 +55,12 @@ class ActionTests(unittest.TestCase):
    self.assertIn('error',a.execute('spreadsheet',{'title':'Bad','values':[{'bad':1}]}))
    self.assertIn('error',a.execute('calendar_event',{'summary':'Test','start':'2026-10-03T10:00:00','end':'2026-10-03T11:00:00'}))
    a.workspace.create_event.assert_not_called();a.workspace.create_sheet.assert_not_called()
+ def test_presentation_accepts_a_short_title_slide(self):
+  with tempfile.TemporaryDirectory() as d:
+   a=Actions(Path(d),'Avery','deck');a.workspace.create_slides=Mock(return_value={'url':'https://docs.google.com/presentation/d/example/edit'})
+   result=a.execute('presentation',{'title':'Deck','slides':['Christmas Tumblers','Bundle overview with verified details and customer value.','KPI framework for traffic, conversion, order value, and repeat purchase.']})
+   self.assertEqual(result['url'],'https://docs.google.com/presentation/d/example/edit')
+   a.workspace.create_slides.assert_called_once()
  def test_cloudflare_no_retry_and_local_daily_cap(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);(root/'work').mkdir();(root/'.env').write_text('CLOUDFLARE_FREE_PLAN_CONFIRMED=true\nCLOUDFLARE_ACCOUNT_ID='+('a'*32)+'\nCLOUDFLARE_API_TOKEN=private-test-token\n')

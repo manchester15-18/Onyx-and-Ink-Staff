@@ -266,7 +266,10 @@ class Actions:
                 values=json.loads(self.clean(json.dumps(values)))
                 return self.workspace.create_sheet(title,values)
             slides=a.get('slides')
-            if not isinstance(slides,list) or not 3<=len(slides)<=15 or any(not isinstance(s,str) or len(s.strip())<40 or len(s)>3000 for s in slides):raise ValueError('Use 3–15 substantive slides, each with at least 40 characters and under 3,000 characters.')
+            # Title and section-divider slides are intentionally brief.  Require
+            # a real deck with at least two substantive slides without rejecting
+            # those legitimate short slides.
+            if not isinstance(slides,list) or not 3<=len(slides)<=15 or any(not isinstance(s,str) or not s.strip() or len(s)>3000 for s in slides) or sum(len(s.strip())>=40 for s in slides)<2:raise ValueError('Use 3–15 slides with at least two substantive slides (40+ characters); title slides may be shorter.')
             return self.workspace.create_slides(title,[self.clean(s) for s in slides])
         if action=='print_sheet':return self.print_sheet(self.text(a,'title',160),a.get('file_ids'))
         if action=='drive_search':return {'files':self.workspace.find_files(self.text(a,'query',160)).get('files',[])}

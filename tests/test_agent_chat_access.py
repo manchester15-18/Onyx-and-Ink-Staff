@@ -20,6 +20,14 @@ class ChatAccessTests(unittest.TestCase):
             action=chat.ask('Morgan','Create a launch report with the next steps.','bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')
             self.assertEqual(action,'Report saved.');chat.act.assert_called_once()
 
+    def test_presentation_about_a_tumbler_uses_the_action_path_not_image_generation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
+            chat=AgentChat(root);chat.llm=Mock();chat.act=Mock(return_value='Google Slides: https://docs.google.com/presentation/d/example/edit')
+            answer=chat.ask('Avery','Create a Google Slides presentation about the Christmas tumbler bundles.','abababab-abab-abab-abab-abababababab')
+            self.assertIn('docs.google.com/presentation',answer)
+            chat.act.assert_called_once()
+
     def test_coworker_email_uses_tools_with_limited_authority(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')

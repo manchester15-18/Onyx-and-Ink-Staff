@@ -105,7 +105,11 @@ class AgentChat:
         messages.append({'role':'user','content':[{'type':'text','text':body}]+blocks if blocks else body})
         try:
             llm=self.get_llm(cfg,agent)
-            design_request=bool(re.search(r'\b(?:create|generate|design|make|render)\b.*\b(?:design|image|graphic|art|png|jpe?g|svg|tumbler|shirt|logo|mockup)\b|\bmock[ -]?up\b',body,re.I))
+            # A presentation may discuss a product (for example, a tumbler), but it
+            # is not an image-generation request.  Check this intent first so the
+            # product noun cannot divert a Google Slides request into Design.
+            presentation_request=bool(re.search(r'\b(?:presentation|google\s+slides?|slide\s+deck|slides?)\b',body,re.I))
+            design_request=not presentation_request and bool(re.search(r'\b(?:create|generate|design|make|render)\b.*\b(?:design|image|graphic|art|png|jpe?g|svg|tumbler|shirt|logo|mockup)\b|\bmock[ -]?up\b',body,re.I))
             if design_request:
                 from agent_actions import Actions
                 result=Actions(self.root,agent,request_id).execute('design',{'prompt':body,'model':'schnell'})
@@ -222,7 +226,7 @@ class AgentChat:
             return result.get('result','Square import completed.')+'\nImported: '+done+('.\nNeeds review: '+failed if failed else '.')        # Image requests are an explicit CEO command.  Execute them directly so
         # a chat model cannot incorrectly claim that a staff member lacks the
         # design capability already available to every agent.
-        if re.search(r'\b(?:create|generate|design|make)\b.*\b(?:design|image|graphic|art|tumbler|shirt|logo|mockup)\b|\bmock[ -]?up\b',body,re.I) and not re.search(r'\b(?:google\s+drive|drive|reference|references)\b',body,re.I):
+        if re.search(r'\b(?:create|generate|design|make)\b.*\b(?:design|image|graphic|art|tumbler|shirt|logo|mockup)\b|\bmock[ -]?up\b',body,re.I) and not re.search(r'\b(?:google\s+drive|drive|reference|references|presentation|google\s+slides?|slide\s+deck|slides?)\b',body,re.I):
             result=actions.execute('design',{'prompt':body,'model':'schnell'})
             if result.get('error'):return 'I could not generate that design: '+str(result['error'])
             return 'I created the design.\n\nAction results:\n'+str(result.get('name','Design'))+': '+str(result.get('url','generated PNG'))
