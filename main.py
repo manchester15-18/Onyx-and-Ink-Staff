@@ -29,7 +29,7 @@ from openai import APIConnectionError, APIStatusError
 from groq_llm import GroqLLM
 from model_routing import RoutingError
 from staff_email import StaffMail
-from report_format import normalize_report
+from report_format import normalize_report, standardize_staff_report
 from report_projects import active_project, ensure_project, consolidate_assignment_reports, project_context
 from staff_tasks import claim as claim_staff_task, complete as complete_staff_task, release as release_staff_task
 from web_research import WebResearchError, search as tavily_search, verify as verify_tavily
@@ -191,7 +191,7 @@ def finalize_assignment_report(path,agent,value=None):
                  '- The unfinished model drafting text was discarded and was not published as a staff report.\n\n'
                  '**Next Action**\n- This assignment will be retried automatically during authorized working hours.')
     else:
-        cleaned=normalize_report(enforce_department_ownership(raw))
+        cleaned=standardize_staff_report(agent+' Department Update',enforce_department_ownership(raw),agent)
         cleaned=re.sub(r'(?i)\bcampaign cycle\b','campaign',cleaned)
         cleaned=re.sub(r'(?i)\bwork cycle\b','assignment',cleaned)
     path.write_text(cleaned.rstrip()+'\n');path.chmod(0o600)
@@ -314,8 +314,8 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
     research = "Use web search for current claims." if search_key else "Web search is unavailable; clearly label market ideas as assumptions and list research needed."
     def task(agent, description, filename):
         return Task(
-            description="CEO directive: " + directive + "\n\n" + description + " Work independently in your permanent department. Choose and finish one useful next action without waiting for another agent. Keep the report under 220 words. Do not invent numerical targets or operational facts; unsupported numbers must be omitted or labeled 'Proposed target — CEO approval required.' Return only the finished plain-text report. Use brief title-style lines and hyphen bullets; no Markdown markers, tables, code fences, or decorative separators. Never include thoughts, reasoning, tool narration, or 'Final Answer'.",
-            expected_output="A complete, concise plain-text report with actions, assumptions, and open decisions; no reasoning transcript, Markdown, or code fence.",
+            description="CEO directive: " + directive + "\n\n" + description + " Work independently in your permanent department. Choose and finish one useful next action without waiting for another agent. Keep the report under 220 words. Do not invent numerical targets or operational facts; unsupported numbers must be omitted or labeled 'Proposed target — CEO approval required.' Return only a concise report using these exact labels, each followed by short hyphen bullets: Summary, Work completed, Assumptions and risks, Next actions, Decisions needed. Write 'None recorded' when a section has nothing to report. Never include thoughts, reasoning, tool narration, Markdown markers, tables, code fences, decorative separators, or 'Final Answer'.",
+            expected_output="A complete concise report using Summary, Work completed, Assumptions and risks, Next actions, and Decisions needed; no reasoning transcript or code fence.",
             agent=agent,
             output_file="{report_dir}/"+filename,
         )

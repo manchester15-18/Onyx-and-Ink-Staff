@@ -4,7 +4,7 @@ import re
 import shutil
 import uuid
 from pathlib import Path
-from report_format import normalize_report
+from report_format import normalize_report, standardize_staff_report
 
 DEFAULT_PROJECT = "onboarding"
 DEFAULT_LABEL = "Onyx & Ink Priorities"
@@ -177,12 +177,16 @@ def consolidated_project_report(root,project=None):
 
 
 def clean_previous_reports(root, project=None):
-    """Remove known model residue from historic report files, retaining Markdown."""
+    """Apply the company format to historic agent and manually created reports."""
     _, _, folder=ensure_project(root,project)
     changed=0
     for path in folder.rglob('*.md'):
+        relative=path.relative_to(folder)
+        if path.name in (OVERVIEW_FILE,'consolidated-project-report.md') or 'archive' in relative.parts:
+            continue
         before=path.read_text(encoding='utf-8')
-        after=normalize_report(before)
+        owner=next((name for name in ('Morgan','Avery','Jordan','Cameron') if name.lower() in relative.parts or name.lower() in path.stem), 'Staff')
+        after=standardize_staff_report(path.stem.replace('-',' ').title(),before,owner)
         if before.rstrip() != after:
             _write_report(path,after);changed+=1
     return changed

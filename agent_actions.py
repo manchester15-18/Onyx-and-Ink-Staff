@@ -18,6 +18,7 @@ from dotenv import dotenv_values
 from workspace_tools import Workspace
 from staff_email import StaffMail, STAFF, valid_address
 from report_projects import active_project, ensure_project, project_slug, project_context, project_overview, save_project_overview, consolidated_project_report
+from report_format import standardize_staff_report
 from storefront import Storefront
 from staff_tasks import enqueue as enqueue_staff_task
 
@@ -61,8 +62,8 @@ class Actions:
         else:
             slug,label,folder=active_project(self.root)
         assignment=folder/'agent-drafts'/self.agent.lower();assignment.mkdir(parents=True,exist_ok=True)
-        cleaned=self.clean(text);report_text=cleaned
-        if not re.search(r'(?m)^#\s+',report_text):report_text='# '+str(title).strip()+'\n\n'+report_text
+        cleaned=self.clean(text)
+        report_text=standardize_staff_report(title,cleaned,self.agent)
         path=assignment/(project_slug(title)+'.md');existed=path.exists()
         temporary=path.with_suffix('.tmp');temporary.write_text(report_text+('' if report_text.endswith('\n') else '\n'));temporary.chmod(0o600);temporary.replace(path)
         result=self.save(title,cleaned.encode(),'.md','project-report')
