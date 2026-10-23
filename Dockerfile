@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8765
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends lsof procps ca-certificates \
+    && apt-get install -y --no-install-recommends git lsof procps ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
