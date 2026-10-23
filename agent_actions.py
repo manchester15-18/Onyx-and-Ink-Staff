@@ -1,8 +1,10 @@
 """Bounded staff actions: files, policy-routed email, Workspace, and research."""
 import csv
+import base64
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -129,7 +131,11 @@ class Actions:
         return root
     @staticmethod
     def git(site,*args):
-        result=subprocess.run(['git','-C',str(site),*args],capture_output=True,text=True,timeout=45)
+        environment=os.environ.copy();token=environment.get('GITHUB_TOKEN','').strip()
+        if token:
+            basic=base64.b64encode(('x-access-token:'+token).encode()).decode()
+            environment.update({'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'http.https://github.com/.extraheader','GIT_CONFIG_VALUE_0':'AUTHORIZATION: basic '+basic})
+        result=subprocess.run(['git','-C',str(site),*args],capture_output=True,text=True,timeout=45,env=environment)
         if result.returncode:raise RuntimeError((result.stderr or result.stdout or 'GitHub operation failed.').strip()[:300])
         return result.stdout.strip()
     def site_path(self,raw,allow_missing=False):
