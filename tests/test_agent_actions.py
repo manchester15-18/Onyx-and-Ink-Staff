@@ -133,4 +133,13 @@ class ActionTests(unittest.TestCase):
    self.assertEqual(a.execute('google_drive',{})['files'][0]['name'],'Brief')
    error=a.execute('not_a_real_action',{})
    self.assertIn('Unknown action "not_a_real_action"',error['error'])
+ def test_jordan_github_access_is_preview_only_and_never_reads_secrets(self):
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);site=root/'cloudflare-storefront';(site/'.git').mkdir(parents=True);(site/'index.html').write_text('<main>Onyx</main>')
+   jordan=Actions(root,'Jordan','repo')
+   with patch.object(Actions,'git',return_value='preview'):
+    result=jordan.execute('github_site_read',{'path':'index.html'})
+   self.assertEqual(result['branch'],'preview');self.assertIn('Onyx',result['content'])
+   self.assertIn('error',jordan.execute('github_site_read',{'path':'.env'}))
+   self.assertIn('error',Actions(root,'Avery','repo').execute('github_site_files',{}))
 if __name__=='__main__':unittest.main()

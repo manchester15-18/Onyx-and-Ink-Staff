@@ -164,6 +164,7 @@ class AgentChat:
             r'\b(?:delete|trash)\b.{0,20}\b(?:email|message)\b',
             r'\b(?:create|make|generate|save|upload|share|edit|update|change|list|produce|compile|export)\b.{0,70}\b(?:report|document|doc|docx|word|pdf|png|print sheet|spreadsheet|sheet|presentation|slides?|design|image|file|drive|product|products|price|description|catalog|calendar event)\b',
             r'\b(?:read|review|summari[sz]e|show|open|check)\b.{0,50}\b(?:project|brief|overview|report|reports)\b',
+            r'\b(?:github|repository|repo|preview branch|site code|storefront code)\b',
             r'\b(?:message|tell|ask|contact)\b(?:\s+\w+){0,8}',
             r'\b(?:search the web|web search|research online|look up online|browse)\b',
         )

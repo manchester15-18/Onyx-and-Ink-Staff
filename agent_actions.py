@@ -5,6 +5,7 @@ import io
 import json
 import re
 import sqlite3
+import subprocess
 import uuid
 import zipfile
 from contextlib import closing
@@ -23,6 +24,8 @@ report {project:project name optional,title,text}; document {title,text}; word_d
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
 design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; workspace_files {};
 products {query:optional}; product_update {id:optional existing/new product ID,title,description,price,image_file_id:optional uploaded/generated image,status:draft,ready,or published}; square_import_website {url:optional public store URL};
+github_site_files {query:optional}; github_site_read {path}; github_preview_patch {path,find,replace,summary}; github_preview_write {path,content,summary};
+github_main_files {query:optional}; github_main_read {path}; github_main_patch_request {path,find,replace,summary};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
 search {query}; webpage {url}. Workspace creation/upload is automatic. Use staff_message for ordinary agent-to-agent coordination in the configured Discord workspace or Telegram staff group. Email to James (CEO), Jaunee (Vice President), named Onyx & Ink agents, or an address explicitly listed in AUTONOMOUS_EXTERNAL_EMAILS sends automatically; any other outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.'''
 
@@ -120,6 +123,93 @@ class Actions:
     def recent(self):
         with closing(self.db()) as db:
             return [dict(zip(('agent','action','status','result','created'),row)) for row in db.execute('SELECT agent,action,status,result,created FROM actions ORDER BY rowid DESC LIMIT 30')]
+    def site_root(self):
+        root=(self.root/'cloudflare-storefront').resolve()
+        if not (root/'.git').exists():raise RuntimeError('The approved storefront repository is not available on this Windows PC.')
+        return root
+    @staticmethod
+    def git(site,*args):
+        result=subprocess.run(['git','-C',str(site),*args],capture_output=True,text=True,timeout=45)
+        if result.returncode:raise RuntimeError((result.stderr or result.stdout or 'GitHub operation failed.').strip()[:300])
+        return result.stdout.strip()
+    def site_path(self,raw,allow_missing=False):
+        if not isinstance(raw,str) or not raw.strip() or len(raw)>220:raise ValueError('Provide a storefront file path.')
+        relative=Path(raw.strip().replace('\\','/'))
+        if relative.is_absolute() or '..' in relative.parts or any(part.startswith('.') for part in relative.parts):raise ValueError('Use a normal storefront file path, not a hidden or parent path.')
+        if relative.suffix.lower() not in ('.html','.css','.js','.json','.md','.txt','.svg'):raise ValueError('Jordan may edit only storefront text, style, script, JSON, SVG, or Markdown files.')
+        site=self.site_root();path=(site/relative).resolve()
+        if not path.is_relative_to(site) or (not allow_missing and not path.is_file()):raise ValueError('That storefront file was not found.')
+        return site,path,relative.as_posix()
+    @staticmethod
+    def site_text_safe(text):
+        banned=(r'(?i)(?:api[_-]?key|token|secret|password)\s*[:=]\s*["\']?[^\s"\']{12,}',r'(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',r'(?i)\b(?:gh[pousr]_|github_pat_|sk_|csk-|AIza)[A-Za-z0-9_-]{16,}')
+        if any(re.search(pattern,text) for pattern in banned):raise ValueError('Site changes cannot contain credentials or private keys.')
+    def github_site_files(self,query=''):
+        site=self.site_root();needle=str(query or '').strip().lower()
+        files=[name for name in self.git(site,'ls-files').splitlines() if name and not name.startswith(('.github/','.env'))]
+        if needle:files=[name for name in files if needle in name.lower()]
+        return {'branch':self.git(site,'branch','--show-current'),'files':files[:160],'count':len(files),'policy':'Preview is editable; main requires owner approval.'}
+    def github_site_read(self,path):
+        site,target,relative=self.site_path(path)
+        if target.stat().st_size>120_000:raise ValueError('That file is too large for chat. Ask for a more specific file.')
+        text=target.read_text(encoding='utf-8')
+        self.site_text_safe(text)
+        return {'branch':self.git(site,'branch','--show-current'),'path':relative,'content':text[:60000]}
+    def github_main_files(self,query=''):
+        site=self.site_root();self.git(site,'fetch','origin','main');needle=str(query or '').strip().lower()
+        files=[name for name in self.git(site,'ls-tree','-r','--name-only','origin/main').splitlines() if name and not name.startswith(('.github/','.env'))]
+        if needle:files=[name for name in files if needle in name.lower()]
+        return {'branch':'main','files':files[:160],'count':len(files),'policy':'Read-only production view. Main changes must be proposed through preview and approved by the owner.'}
+    def github_main_read(self,path):
+        site,_,relative=self.site_path(path,allow_missing=True);self.git(site,'fetch','origin','main')
+        text=self.git(site,'show','origin/main:'+relative)
+        if len(text)>60000:raise ValueError('That file is too large for chat. Ask for a more specific file.')
+        self.site_text_safe(text)
+        return {'branch':'main','path':relative,'content':text,'policy':'Read-only production view.'}
+    def github_preview_change(self,path,content,summary,expect=None):
+        if self.agent!='Jordan':raise ValueError('Only Jordan may manage the approved storefront repository.')
+        if not isinstance(content,str) or not content.strip() or len(content)>300_000:raise ValueError('Provide storefront content under 300,000 characters.')
+        if not isinstance(summary,str) or not summary.strip() or len(summary)>120:raise ValueError('Provide a concise change summary.')
+        self.site_text_safe(content)
+        site,target,relative=self.site_path(path,allow_missing=expect is None)
+        branch=self.git(site,'branch','--show-current')
+        if branch!='preview':raise RuntimeError('Jordan can edit only the preview branch. Main is protected for owner approval.')
+        self.git(site,'fetch','origin','preview')
+        ahead=self.git(site,'merge-base','--is-ancestor','origin/preview','HEAD')
+        if ahead is None:raise RuntimeError('GitHub preview has changes that need review before editing.')
+        if target.exists():
+            current=target.read_text(encoding='utf-8')
+            if expect is not None:
+                if not isinstance(expect,str) or not expect or current.count(expect)!=1:raise ValueError('The requested preview replacement must match exactly one existing passage.')
+                content=current.replace(expect,content,1)
+            self.site_text_safe(current)
+        elif expect is not None:raise ValueError('Use github_preview_write only for a new storefront file.')
+        target.parent.mkdir(parents=True,exist_ok=True);temporary=target.with_suffix(target.suffix+'.tmp');temporary.write_text(content,encoding='utf-8');temporary.replace(target)
+        try:
+            self.git(site,'diff','--check')
+            if target.suffix=='.js':
+                check=subprocess.run(['node','--check',str(target)],capture_output=True,text=True,timeout=30)
+                if check.returncode:raise RuntimeError((check.stderr or 'JavaScript syntax check failed.').strip()[:300])
+            self.git(site,'add','--',relative)
+            if not self.git(site,'diff','--cached','--name-only').strip():raise ValueError('That change does not alter the storefront file.')
+            self.git(site,'commit','-m','Jordan preview: '+summary.strip())
+            self.git(site,'push','origin','preview')
+        except Exception:
+            try:self.git(site,'restore','--staged','--worktree','--',relative)
+            except Exception:pass
+            raise
+        return {'result':'Preview change committed and pushed for Cloudflare Preview review.','branch':'preview','path':relative,'summary':summary.strip(),'review_url':'https://preview.onyx-and-ink-site.pages.dev/','production':'Main remains protected and requires owner-approved pull request.'}
+    def github_main_patch_request(self,path,find,replace,summary):
+        if self.agent!='Jordan':raise ValueError('Only Jordan may prepare approved storefront changes.')
+        site,target,relative=self.site_path(path,allow_missing=True);self.git(site,'fetch','origin','main')
+        main=self.git(site,'show','origin/main:'+relative)
+        preview=target.read_text(encoding='utf-8') if target.exists() else ''
+        if preview!=main:raise RuntimeError('Preview differs from main for this file. Review or merge the existing Preview work before proposing another production change.')
+        if not isinstance(find,str) or not find or main.count(find)!=1:raise ValueError('The requested main replacement must match exactly one production passage.')
+        proposed=main.replace(find,replace,1)
+        result=self.github_preview_change(relative,proposed,'Main approval request: '+summary)
+        result.update({'approval_required':True,'production':'A pull request from preview to main must be reviewed and explicitly approved by the owner before merge.'})
+        return result
     def execute(self,action,args):
         if not isinstance(args,dict):raise ValueError('Action arguments must be an object.')
         identifier=hashlib.sha256((self.run_id+self.agent+action+json.dumps(args,sort_keys=True)).encode()).hexdigest()
@@ -274,6 +364,24 @@ class Actions:
                         try:image_path.unlink()
                         except OSError:pass
             return {'result':'Imported '+str(len(imported))+' of '+str(len(source))+' public storefront products into Square '+square.mode+'.','imported':imported,'failed':failed,'environment':square.mode}
+        if action=='github_site_files':
+            if self.agent!='Jordan':raise ValueError('Only Jordan may access the approved storefront repository.')
+            return self.github_site_files(str(a.get('query','')))
+        if action=='github_site_read':
+            if self.agent!='Jordan':raise ValueError('Only Jordan may access the approved storefront repository.')
+            return self.github_site_read(self.text(a,'path',220))
+        if action=='github_preview_patch':
+            return self.github_preview_change(self.text(a,'path',220),self.text(a,'replace',300000),self.text(a,'summary',120),self.text(a,'find',120000))
+        if action=='github_preview_write':
+            return self.github_preview_change(self.text(a,'path',220),self.text(a,'content',300000),self.text(a,'summary',120))
+        if action=='github_main_files':
+            if self.agent!='Jordan':raise ValueError('Only Jordan may access the approved storefront repository.')
+            return self.github_main_files(str(a.get('query','')))
+        if action=='github_main_read':
+            if self.agent!='Jordan':raise ValueError('Only Jordan may access the approved storefront repository.')
+            return self.github_main_read(self.text(a,'path',220))
+        if action=='github_main_patch_request':
+            return self.github_main_patch_request(self.text(a,'path',220),self.text(a,'find',120000),self.text(a,'replace',300000),self.text(a,'summary',100))
         if action=='products':
             if self.agent!='Jordan':raise ValueError('Only Jordan manages the storefront catalog.')
             return {'products':self.storefront.list(str(a.get('query','')))}
