@@ -13,19 +13,23 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from report_projects import active_project
 
-DEFAULT_OBJECTIVE='Continue advancing the current Onyx & Ink priorities. Start the highest-priority unfinished work immediately, make only verifiable progress, and ask the CEO one focused question only when a decision blocks the next useful action.'
+DEFAULT_OBJECTIVE='''Work only from the active project overview, consolidated report, current role reports, and assigned staff tasks. Treat approved facts as binding; treat assumptions, placeholders, and open decisions as unapproved. Work in dependency order: Morgan maintains one decision/dependency register and assigns the next concrete task; Jordan converts verified product and technical facts into tested Preview-ready work; Avery refines one current customer-facing copy or asset draft from verified facts; Cameron completes one current policy or compliance section with placeholders where a CEO decision is still needed. Update the existing role report or project document instead of creating duplicates. Record evidence, the next owner, and the remaining blocker. Do not publish to production, invent pricing, inventory, delivery promises, policy positions, or campaign claims. If a CEO decision truly blocks further useful work, Morgan sends one concise decision packet with the options, recommendation, impact, and exact approval needed; otherwise continue the next unblocked task.'''
 BUSINESS_TZ=ZoneInfo('America/New_York')
 
 
 def report_context(root):
-    """Keep enough prior work for continuity without flooding every model call."""
+    """Use the active project's current reports, not stale work from other projects."""
+    _,_,folder=active_project(root)
+    candidates=[folder/'overview.md',folder/'consolidated-project-report.md']
+    candidates.extend(sorted((folder/'agent-reports').glob('*.md')) if (folder/'agent-reports').exists() else [])
+    candidates.extend(sorted((folder/'manual').glob('**/*.md')) if (folder/'manual').exists() else [])
     sections=[]
-    for path in sorted((Path(root)/'reports').glob('**/*.md'), key=lambda item:item.stat().st_mtime, reverse=True)[:20]:
+    for path in candidates:
         try:text=path.read_text().strip()
         except OSError:continue
         if text:
-            sections.append(path.stem.replace('_',' ').title()+':\n'+text[:450])
-    return '\n\n'.join(sections)[:1800]
+            sections.append(path.stem.replace('_',' ').title()+':\n'+text[:650])
+    return '\n\n'.join(sections)[:2600]
 
 
 def valid_time(value):

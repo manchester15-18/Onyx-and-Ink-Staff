@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock,patch
-from staff_autonomy import StaffAutonomy,in_window
+from staff_autonomy import StaffAutonomy,in_window,report_context
 from report_projects import ensure_project, save_project_overview
 
 
@@ -46,6 +46,16 @@ class StaffAutonomyTests(unittest.TestCase):
             with patch('staff_autonomy.subprocess.Popen') as launch:manager.tick()
             self.assertFalse(launch.called)
             self.assertGreaterEqual(manager.load()['capacityReadyEpoch'],ready-1)
+
+    def test_context_excludes_reports_from_other_projects_and_legacy_nested_reports(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);_,_,active=ensure_project(root,'Current','Current',activate=True);_,_,other=ensure_project(root,'Old','Old')
+            save_project_overview(root,'current','# Current\n\n## Background\nActive work.\n\n## Goals\n- Finish.\n\n## Desired outcomes\n- Verified result.')
+            (active/'agent-reports').mkdir();(active/'agent-reports'/'jordan-web-it.md').write_text('Current Jordan action')
+            (active/'agent-reports'/'agent-reports').mkdir();(active/'agent-reports'/'agent-reports'/'jordan-web-it.md').write_text('Stale nested action')
+            (other/'agent-reports').mkdir();(other/'agent-reports'/'avery-marketing.md').write_text('Old project action')
+            context=report_context(root)
+            self.assertIn('Current Jordan action',context);self.assertNotIn('Stale nested action',context);self.assertNotIn('Old project action',context)
 
     def test_failed_run_marks_agents_waiting_and_records_backoff(self):
         with tempfile.TemporaryDirectory() as folder:
