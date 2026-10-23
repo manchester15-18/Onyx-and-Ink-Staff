@@ -156,12 +156,17 @@ class Actions:
         self.site_text_safe(text)
         return {'branch':self.git(site,'branch','--show-current'),'path':relative,'content':text[:60000]}
     def github_main_files(self,query=''):
-        site=self.site_root();self.git(site,'fetch','origin','main');needle=str(query or '').strip().lower()
+        site=self.site_root()
+        try:self.git(site,'fetch','origin','main')
+        except RuntimeError:pass
+        needle=str(query or '').strip().lower()
         files=[name for name in self.git(site,'ls-tree','-r','--name-only','origin/main').splitlines() if name and not name.startswith(('.github/','.env'))]
         if needle:files=[name for name in files if needle in name.lower()]
         return {'branch':'main','files':files[:160],'count':len(files),'policy':'Read-only production view. Main changes must be proposed through preview and approved by the owner.'}
     def github_main_read(self,path):
-        site,_,relative=self.site_path(path,allow_missing=True);self.git(site,'fetch','origin','main')
+        site,_,relative=self.site_path(path,allow_missing=True)
+        try:self.git(site,'fetch','origin','main')
+        except RuntimeError:pass
         text=self.git(site,'show','origin/main:'+relative)
         if len(text)>60000:raise ValueError('That file is too large for chat. Ask for a more specific file.')
         self.site_text_safe(text)
@@ -201,7 +206,9 @@ class Actions:
         return {'result':'Preview change committed and pushed for Cloudflare Preview review.','branch':'preview','path':relative,'summary':summary.strip(),'review_url':'https://preview.onyx-and-ink-site.pages.dev/','production':'Main remains protected and requires owner-approved pull request.'}
     def github_main_patch_request(self,path,find,replace,summary):
         if self.agent!='Jordan':raise ValueError('Only Jordan may prepare approved storefront changes.')
-        site,target,relative=self.site_path(path,allow_missing=True);self.git(site,'fetch','origin','main')
+        site,target,relative=self.site_path(path,allow_missing=True)
+        try:self.git(site,'fetch','origin','main')
+        except RuntimeError:pass
         main=self.git(site,'show','origin/main:'+relative)
         preview=target.read_text(encoding='utf-8') if target.exists() else ''
         if preview!=main:raise RuntimeError('Preview differs from main for this file. Review or merge the existing Preview work before proposing another production change.')
