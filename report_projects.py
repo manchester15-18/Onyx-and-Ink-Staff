@@ -39,20 +39,21 @@ def _state_path(root):
 
 
 def _load(root):
-    base = {"active": DEFAULT_PROJECT, "labels": {DEFAULT_PROJECT: DEFAULT_LABEL}}
+    fallback = {"active": DEFAULT_PROJECT, "labels": {DEFAULT_PROJECT: DEFAULT_LABEL}}
     try:
         saved = json.loads(_state_path(root).read_text())
         if isinstance(saved, dict):
-            base["active"] = project_slug(saved.get("active", DEFAULT_PROJECT))
+            base={"active": project_slug(saved.get("active", DEFAULT_PROJECT)), "labels": {}}
             labels = saved.get("labels", {})
             if isinstance(labels, dict):
                 for key, label in labels.items():
                     slug = project_slug(key)
                     if isinstance(label, str) and label.strip():
                         base["labels"][slug] = label.strip()[:80]
+            return base
     except (OSError, ValueError, TypeError):
         pass
-    return base
+    return fallback
 
 
 def _save(root, state):

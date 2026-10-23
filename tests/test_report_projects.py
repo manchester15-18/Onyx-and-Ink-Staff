@@ -42,6 +42,7 @@ class ReportProjectTests(unittest.TestCase):
             ensure_project(root,'Second Project','Second Project',activate=True)
             active=delete_project(root,'holiday-launch')
             self.assertEqual(active,'second-project');self.assertFalse((root/'reports/holiday-launch').exists())
+            self.assertNotIn('holiday-launch',[item['id'] for item in projects(root)])
             with self.assertRaises(ValueError):delete_report(root,'../outside.md')
 
 
