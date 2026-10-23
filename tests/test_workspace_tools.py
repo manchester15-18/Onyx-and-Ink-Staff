@@ -31,5 +31,11 @@ class WorkspaceToolsTests(unittest.TestCase):
             self.assertLessEqual(transform['translateX']+size['width']['magnitude'],720)
             self.assertLessEqual(transform['translateY']+size['height']['magnitude'],405)
 
+    def test_generated_slide_copy_is_shortened_to_its_text_box(self):
+        source='A very long title ' * 40+'\n'+'Long body copy ' * 200
+        operations=Workspace('/tmp/example')._slide_operations([source])
+        inserted=[item['insertText']['text'] for item in operations if 'insertText' in item]
+        self.assertTrue(any(value.endswith('…') for value in inserted))
+
 
 if __name__=='__main__':unittest.main()

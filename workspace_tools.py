@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import textwrap
 import uuid
 from pathlib import Path
 from urllib.parse import quote
@@ -124,8 +125,20 @@ class Workspace:
         # at creation time so no generated element can fall outside the slide.
         scale=.75
         palette={'ink':{'red':0.035,'green':0.043,'blue':0.067},'paper':{'red':0.957,'green':0.941,'blue':0.900},'gold':{'red':0.89,'green':0.61,'blue':0.18},'muted':{'red':0.72,'green':0.73,'blue':0.76}}
+        def fit_text(value,width,height,size):
+            """Keep generated copy within a native Google Slides text box."""
+            characters=max(12,int((width*scale)/(size*.52)))
+            lines=max(1,int((height*scale)/(size*1.32)))
+            wrapped=[]
+            for paragraph in str(value).splitlines() or ['']:
+                wrapped.extend(textwrap.wrap(paragraph,width=characters,break_long_words=False,break_on_hyphens=False) or [''])
+            if len(wrapped)>lines:
+                wrapped=wrapped[:lines]
+                wrapped[-1]=wrapped[-1].rstrip(' ,;:.')+'…'
+            return '\n'.join(wrapped)
         def textbox(identifier,slide,text,x,y,w,h,size,color,bold=False):
-            operations.extend([{'createShape':{'objectId':identifier,'shapeType':'TEXT_BOX','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':w*scale,'unit':'PT'},'height':{'magnitude':h*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':x*scale,'translateY':y*scale,'unit':'PT'}}}}, {'insertText':{'objectId':identifier,'text':text}}, {'updateTextStyle':{'objectId':identifier,'textRange':{'type':'ALL'},'style':{'fontFamily':'Aptos','fontSize':{'magnitude':size,'unit':'PT'},'bold':bold,'foregroundColor':{'opaqueColor':{'rgbColor':color}}},'fields':'fontFamily,fontSize,bold,foregroundColor'}}])
+            fitted=fit_text(text,w,h,size)
+            operations.extend([{'createShape':{'objectId':identifier,'shapeType':'TEXT_BOX','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':w*scale,'unit':'PT'},'height':{'magnitude':h*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':x*scale,'translateY':y*scale,'unit':'PT'}}}}, {'insertText':{'objectId':identifier,'text':fitted}}, {'updateTextStyle':{'objectId':identifier,'textRange':{'type':'ALL'},'style':{'fontFamily':'Aptos','fontSize':{'magnitude':size,'unit':'PT'},'bold':bold,'foregroundColor':{'opaqueColor':{'rgbColor':color}}},'fields':'fontFamily,fontSize,bold,foregroundColor'}}])
         for index,raw in enumerate(slides,1):
             text=str(raw).strip();title,separator,body=text.partition('\n')
             # A generated deck has one compact headline per slide.  This keeps
@@ -136,12 +149,12 @@ class Workspace:
             slide='slide_'+uuid.uuid4().hex;accent='accent_'+uuid.uuid4().hex;title_box='title_'+uuid.uuid4().hex;body_box='body_'+uuid.uuid4().hex;label_box='label_'+uuid.uuid4().hex;footer_box='footer_'+uuid.uuid4().hex
             operations.extend([{'createSlide':{'objectId':slide,'slideLayoutReference':{'predefinedLayout':'BLANK'}}},{'updatePageProperties':{'objectId':slide,'pageProperties':{'pageBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['ink']}}}},'fields':'pageBackgroundFill.solidFill.color'}},{'createShape':{'objectId':accent,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':132*scale,'unit':'PT'},'height':{'magnitude':7*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':64*scale,'translateY':55*scale,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':accent,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
             if index==1:
-                textbox(title_box,slide,title,64,112,720,72,42,palette['paper'],True)
+                textbox(title_box,slide,title,64,112,720,96,28,palette['paper'],True)
                 textbox(body_box,slide,body,68,214,550,150,20,palette['muted'])
                 textbox(label_box,slide,'ONYX & INK',68,80,240,24,12,palette['gold'],True)
             else:
                 textbox(label_box,slide,'ONYX & INK  /  '+str(index).zfill(2),68,80,300,22,11,palette['gold'],True)
-                textbox(title_box,slide,title,64,116,690,60,34,palette['paper'],True)
+                textbox(title_box,slide,title,64,116,690,88,26,palette['paper'],True)
                 rule='rule_'+uuid.uuid4().hex
                 operations.extend([{'createShape':{'objectId':rule,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':5*scale,'unit':'PT'},'height':{'magnitude':248*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':68*scale,'translateY':205*scale,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':rule,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
                 textbox(body_box,slide,body,98,205,650,250,21,palette['paper'])
