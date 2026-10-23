@@ -119,14 +119,22 @@ class Workspace:
     def _slide_operations(self,slides):
         """Build a restrained, editorial 16:9 slide composition for staff decks."""
         operations=[]
+        # Google Slides presents a 720×405 point 16:9 canvas.  Keep the
+        # existing 960×540 composition grid, but scale every geometry value
+        # at creation time so no generated element can fall outside the slide.
+        scale=.75
         palette={'ink':{'red':0.035,'green':0.043,'blue':0.067},'paper':{'red':0.957,'green':0.941,'blue':0.900},'gold':{'red':0.89,'green':0.61,'blue':0.18},'muted':{'red':0.72,'green':0.73,'blue':0.76}}
         def textbox(identifier,slide,text,x,y,w,h,size,color,bold=False):
-            operations.extend([{'createShape':{'objectId':identifier,'shapeType':'TEXT_BOX','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':w,'unit':'PT'},'height':{'magnitude':h,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':x,'translateY':y,'unit':'PT'}}}}, {'insertText':{'objectId':identifier,'text':text}}, {'updateTextStyle':{'objectId':identifier,'textRange':{'type':'ALL'},'style':{'fontFamily':'Aptos','fontSize':{'magnitude':size,'unit':'PT'},'bold':bold,'foregroundColor':{'opaqueColor':{'rgbColor':color}}},'fields':'fontFamily,fontSize,bold,foregroundColor'}}])
+            operations.extend([{'createShape':{'objectId':identifier,'shapeType':'TEXT_BOX','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':w*scale,'unit':'PT'},'height':{'magnitude':h*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':x*scale,'translateY':y*scale,'unit':'PT'}}}}, {'insertText':{'objectId':identifier,'text':text}}, {'updateTextStyle':{'objectId':identifier,'textRange':{'type':'ALL'},'style':{'fontFamily':'Aptos','fontSize':{'magnitude':size,'unit':'PT'},'bold':bold,'foregroundColor':{'opaqueColor':{'rgbColor':color}}},'fields':'fontFamily,fontSize,bold,foregroundColor'}}])
         for index,raw in enumerate(slides,1):
             text=str(raw).strip();title,separator,body=text.partition('\n')
+            # A generated deck has one compact headline per slide.  This keeps
+            # automatic text inside the title region even when a model returns
+            # prose in place of a slide title.
+            title=title.strip()[:72]
             body=body.lstrip('\n').strip() if separator else ''
             slide='slide_'+uuid.uuid4().hex;accent='accent_'+uuid.uuid4().hex;title_box='title_'+uuid.uuid4().hex;body_box='body_'+uuid.uuid4().hex;label_box='label_'+uuid.uuid4().hex;footer_box='footer_'+uuid.uuid4().hex
-            operations.extend([{'createSlide':{'objectId':slide,'slideLayoutReference':{'predefinedLayout':'BLANK'}}},{'updatePageProperties':{'objectId':slide,'pageProperties':{'pageBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['ink']}}}},'fields':'pageBackgroundFill.solidFill.color'}},{'createShape':{'objectId':accent,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':132,'unit':'PT'},'height':{'magnitude':7,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':64,'translateY':55,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':accent,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
+            operations.extend([{'createSlide':{'objectId':slide,'slideLayoutReference':{'predefinedLayout':'BLANK'}}},{'updatePageProperties':{'objectId':slide,'pageProperties':{'pageBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['ink']}}}},'fields':'pageBackgroundFill.solidFill.color'}},{'createShape':{'objectId':accent,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':132*scale,'unit':'PT'},'height':{'magnitude':7*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':64*scale,'translateY':55*scale,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':accent,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
             if index==1:
                 textbox(title_box,slide,title,64,112,720,72,42,palette['paper'],True)
                 textbox(body_box,slide,body,68,214,550,150,20,palette['muted'])
@@ -135,7 +143,7 @@ class Workspace:
                 textbox(label_box,slide,'ONYX & INK  /  '+str(index).zfill(2),68,80,300,22,11,palette['gold'],True)
                 textbox(title_box,slide,title,64,116,690,60,34,palette['paper'],True)
                 rule='rule_'+uuid.uuid4().hex
-                operations.extend([{'createShape':{'objectId':rule,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':5,'unit':'PT'},'height':{'magnitude':248,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':68,'translateY':205,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':rule,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
+                operations.extend([{'createShape':{'objectId':rule,'shapeType':'RECTANGLE','elementProperties':{'pageObjectId':slide,'size':{'width':{'magnitude':5*scale,'unit':'PT'},'height':{'magnitude':248*scale,'unit':'PT'}},'transform':{'scaleX':1,'scaleY':1,'translateX':68*scale,'translateY':205*scale,'unit':'PT'}}}},{'updateShapeProperties':{'objectId':rule,'shapeProperties':{'shapeBackgroundFill':{'solidFill':{'color':{'rgbColor':palette['gold']}}},'outline':{'propertyState':'NOT_RENDERED'}},'fields':'shapeBackgroundFill.solidFill.color,outline.propertyState'}}])
                 textbox(body_box,slide,body,98,205,650,250,21,palette['paper'])
             textbox(footer_box,slide,'ONYX & INK',750,493,130,18,10,palette['muted'],True)
         return operations

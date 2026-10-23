@@ -22,5 +22,14 @@ class WorkspaceToolsTests(unittest.TestCase):
             self.assertEqual(operations[0]['deleteContentRange']['range'],{'startIndex':1,'endIndex':13})
             self.assertEqual(operations[1]['insertText']['text'],'Replacement\n')
 
+    def test_generated_slide_geometry_stays_inside_google_slides_canvas(self):
+        operations=Workspace('/tmp/example')._slide_operations(['A concise title\nThis body has enough text to verify the generated layout remains on the visible slide canvas.'])
+        for operation in operations:
+            element=operation.get('createShape',{}).get('elementProperties',{})
+            if not element:continue
+            size=element['size'];transform=element['transform']
+            self.assertLessEqual(transform['translateX']['magnitude']+size['width']['magnitude'],720)
+            self.assertLessEqual(transform['translateY']['magnitude']+size['height']['magnitude'],405)
+
 
 if __name__=='__main__':unittest.main()
