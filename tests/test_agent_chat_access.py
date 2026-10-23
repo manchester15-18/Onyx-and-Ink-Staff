@@ -28,6 +28,14 @@ class ChatAccessTests(unittest.TestCase):
             self.assertIn('docs.google.com/presentation',answer)
             chat.act.assert_called_once()
 
+    def test_design_deck_term_uses_google_slides_action_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
+            chat=AgentChat(root);chat.llm=Mock();chat.act=Mock(return_value='Google Slides: https://docs.google.com/presentation/d/example/edit')
+            answer=chat.ask('Avery','Create a design deck for the Christmas tumbler launch.','acacacac-acac-acac-acac-acacacacacac')
+            self.assertIn('docs.google.com/presentation',answer)
+            self.assertIn('first action must be presentation',chat.act.call_args.args[1][0]['content'])
+
     def test_coworker_email_uses_tools_with_limited_authority(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')

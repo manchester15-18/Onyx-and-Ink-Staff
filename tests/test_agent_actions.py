@@ -61,6 +61,11 @@ class ActionTests(unittest.TestCase):
    result=a.execute('presentation',{'title':'Deck','slides':['Christmas Tumblers','Bundle overview with verified details and customer value.','KPI framework for traffic, conversion, order value, and repeat purchase.']})
    self.assertEqual(result['url'],'https://docs.google.com/presentation/d/example/edit')
    a.workspace.create_slides.assert_called_once()
+ def test_slide_and_deck_aliases_create_native_google_slides(self):
+  with tempfile.TemporaryDirectory() as d:
+   a=Actions(Path(d),'Avery','deck-alias');a.workspace.create_slides=Mock(return_value={'url':'https://docs.google.com/presentation/d/example/edit'})
+   result=a.execute('slide_deck',{'title':'Deck','slides':['Title','A substantive first slide with customer value and approved details.','A substantive second slide with next steps and success criteria.']})
+   self.assertIn('docs.google.com/presentation',result['url']);a.workspace.create_slides.assert_called_once()
  def test_cloudflare_no_retry_and_local_daily_cap(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);(root/'work').mkdir();(root/'.env').write_text('CLOUDFLARE_FREE_PLAN_CONFIRMED=true\nCLOUDFLARE_ACCOUNT_ID='+('a'*32)+'\nCLOUDFLARE_API_TOKEN=private-test-token\n')
