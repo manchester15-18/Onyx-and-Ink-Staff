@@ -28,8 +28,8 @@ class WorkspaceToolsTests(unittest.TestCase):
             element=operation.get('createShape',{}).get('elementProperties',{})
             if not element:continue
             size=element['size'];transform=element['transform']
-            self.assertLessEqual(transform['translateX']['magnitude']+size['width']['magnitude'],720)
-            self.assertLessEqual(transform['translateY']['magnitude']+size['height']['magnitude'],405)
+            self.assertLessEqual(transform['translateX']+size['width']['magnitude'],720)
+            self.assertLessEqual(transform['translateY']+size['height']['magnitude'],405)
 
 
 if __name__=='__main__':unittest.main()
