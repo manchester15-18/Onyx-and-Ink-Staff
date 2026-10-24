@@ -18,8 +18,8 @@ import uuid
 from dotenv import load_dotenv
 from main import PROJECT_DIR, credential, positive_int
 from crewai import Agent, Crew, Process, Task
-from groq_llm import GroqLLM
-from staff_email import INTERNAL_RECIPIENTS, StaffMail, STAFF, valid_address
+from staff.groq_llm import GroqLLM
+from staff.staff_email import INTERNAL_RECIPIENTS, StaffMail, STAFF, valid_address
 
 ROLES = {'Morgan':'COO and operations', 'Avery':'marketing and campaigns',
          'Jordan':'web development and storefront requirements', 'Cameron':'legal/HR policy drafts'}
@@ -299,10 +299,10 @@ def main(argv=None):
         user=mail.oauth.user if mail.oauth else os.getenv('IMAP_USER') or os.getenv('SMTP_USER','')
         password=os.getenv('IMAP_PASSWORD') or os.getenv('SMTP_PASSWORD','')
         interval=positive_int('INBOX_POLL_SECONDS',60)
-        from model_routing import RoutedLLM
+        from staff.model_routing import RoutedLLM
         from dotenv import dotenv_values
         llm=RoutedLLM(PROJECT_DIR,{**os.environ,**dotenv_values(PROJECT_DIR/'.env')},'Morgan',max_tokens=positive_int('GROQ_MAX_COMPLETION_TOKENS',1000))
-        from agent_chat import AgentChat
+        from staff.agent_chat import AgentChat
         chat=AgentChat(PROJECT_DIR)
         def reply(staff,message,body):
             sender=parseaddr(message.get('From',''))[1].lower()

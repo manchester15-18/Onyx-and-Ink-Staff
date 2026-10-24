@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 import requests
-from model_routing import RoutedLLM,RoutingError,routes,routing_status
+from staff.model_routing import RoutedLLM,RoutingError,routes,routing_status
 
 class RoutingTests(unittest.TestCase):
     def setUp(self):

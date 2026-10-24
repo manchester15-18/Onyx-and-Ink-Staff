@@ -9,12 +9,12 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 from unittest.mock import Mock,patch
-from dashboard_mail import Mailbox
-from inbox_state import InboxState
-from agent_actions import Actions
-from staff_email import StaffMail,STAFF
+from staff.dashboard_mail import Mailbox
+from staff.inbox_state import InboxState
+from staff.agent_actions import Actions
+from staff.staff_email import StaffMail,STAFF
 import dashboard
-import github_sync
+import staff.github_sync
 
 class InboxRevampTests(unittest.TestCase):
  def test_cleanup_hide_restore_never_mutates_gmail(self):

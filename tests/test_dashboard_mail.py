@@ -2,7 +2,7 @@ import base64
 from pathlib import Path
 import unittest
 from unittest.mock import patch
-from dashboard_mail import Mailbox
+from staff.dashboard_mail import Mailbox
 
 class MailboxTests(unittest.TestCase):
     def test_plain_message_threading_no_replyto_redirect(self):
@@ -50,7 +50,7 @@ class ManualReplyTests(unittest.TestCase):
         import tempfile
         from email.parser import BytesParser
         from email import policy
-        from staff_email import StaffMail, STAFF
+        from staff.staff_email import StaffMail, STAFF
         with tempfile.TemporaryDirectory() as d:
             addresses={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
             mail=StaffMail(d,'draft',addresses,bcc='personal@example.com')

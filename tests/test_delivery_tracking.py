@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 import json
-from delivery_tracking import check_delivery
-from dashboard_mail import Mailbox
+from staff.delivery_tracking import check_delivery
+from staff.dashboard_mail import Mailbox
 
 class DeliveryTests(unittest.TestCase):
     def outgoing(self,root):

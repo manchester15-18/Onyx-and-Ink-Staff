@@ -19,15 +19,15 @@ from email import policy
 from email.parser import BytesParser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from dotenv import dotenv_values, set_key
-from dashboard_mail import Mailbox
-from staff_email import StaffMail,signature_settings,save_signature_settings,reset_signature_settings,valid_address
-from report_format import normalize_report
-from delivery_tracking import check_delivery
-from inbox_state import InboxState
-from staff_autonomy import StaffAutonomy
-from report_projects import create_report, delete_project, delete_report, ensure_project, projects, consolidate_assignment_reports, project_overview, save_project_overview
-from staff_tasks import status as staff_task_status
-from report_records import export_google_doc, metadata_many as report_metadata_many, report_pdf
+from staff.dashboard_mail import Mailbox
+from staff.staff_email import StaffMail,signature_settings,save_signature_settings,reset_signature_settings,valid_address
+from staff.report_format import normalize_report
+from staff.delivery_tracking import check_delivery
+from staff.inbox_state import InboxState
+from staff.staff_autonomy import StaffAutonomy
+from staff.report_projects import create_report, delete_project, delete_report, ensure_project, projects, consolidate_assignment_reports, project_overview, save_project_overview
+from staff.staff_tasks import status as staff_task_status
+from staff.report_records import export_google_doc, metadata_many as report_metadata_many, report_pdf
 
 os.environ['CREWAI_TELEMETRY_DISABLED']='true'
 os.environ['CREWAI_TRACING_ENABLED']='false'
@@ -46,11 +46,11 @@ WORKSPACE_SETUP = None
 MAILBOX = Mailbox(ROOT)
 STOP = threading.Event()
 DESIRED = ROOT/'work'/'monitor-enabled.json'
-from dashboard_access import Access
-from agent_chat import AgentChat, TelegramBridge
-from discord_bridge import DiscordBridge
-from agent_actions import Actions
-from model_routing import routing_status, DEFAULTS
+from staff.dashboard_access import Access
+from staff.agent_chat import AgentChat, TelegramBridge
+from staff.discord_bridge import DiscordBridge
+from staff.agent_actions import Actions
+from staff.model_routing import routing_status, DEFAULTS
 ACCESS = Access(ROOT)
 CHAT = AgentChat(ROOT)
 TELEGRAM = TelegramBridge(ROOT,CHAT,STOP)
@@ -471,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
                         try:(ROOT/'work'/transient).unlink()
                         except FileNotFoundError:pass
                     with (ROOT/'work'/'workspace-setup.log').open('ab') as output:
-                        WORKSPACE_SETUP=subprocess.Popen([sys.executable,'-u',str(ROOT/'workspace_tools.py'),'--authorize'],cwd=ROOT,stdout=output,stderr=output)
+                        WORKSPACE_SETUP=subprocess.Popen([sys.executable,'-u','-m','staff.workspace_tools','--authorize'],cwd=ROOT,stdout=output,stderr=output)
                     auth_file=ROOT/'work'/'workspace-auth-url.json'
                     for _ in range(30):
                         if auth_file.exists():break
@@ -481,7 +481,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not url:return self.reply(500,{'error':'Google sign-in could not be prepared. Check the local monitor log.'})
                     return self.reply(200,{'message':'Continue Google sign-in in the browser window that just opened.','url':url})
                 elif self.path=='/api/workspace-check':
-                    from workspace_tools import Workspace,save_status
+                    from staff.workspace_tools import Workspace,save_status
                     result=Workspace(ROOT).request('GET','https://www.googleapis.com/drive/v3/about',params={'fields':'user(emailAddress)'})
                     account=result.get('user',{}).get('emailAddress','')
                     save_status(ROOT,'connected',account,'Connection verified with Google Drive.')
@@ -505,7 +505,7 @@ class Handler(BaseHTTPRequestHandler):
                     if environment not in ('sandbox','production'):raise ValueError('Choose Square sandbox or production.')
                     if token and (len(token)<20 or len(token)>512 or any(c.isspace() for c in token)):raise ValueError('Enter a valid Square access token.')
                     if self.path=='/api/square-check':
-                        from square_commerce import SquareCommerce
+                        from staff.square_commerce import SquareCommerce
                         return self.reply(200,SquareCommerce(ROOT).check())
                     if token:set_key(str(ROOT/'.env'),'SQUARE_ACCESS_TOKEN',token,quote_mode='never')
                     set_key(str(ROOT/'.env'),'SQUARE_ENVIRONMENT',environment,quote_mode='never')
@@ -518,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
                     (ROOT/'.env').chmod(0o600)
                     return self.reply(200,{'message':'Tavily key saved locally.'})
                 elif self.path=='/api/tavily-check':
-                    from web_research import WebResearchError,verify
+                    from staff.web_research import WebResearchError,verify
                     key=dotenv_values(ROOT/'.env').get('TAVILY_API_KEY')
                     try:verify(key)
                     except WebResearchError as error:return self.reply(400,{'error':str(error)})
@@ -677,7 +677,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not body or len(body)>20000 or not re.fullmatch('[a-f0-9-]{36}',request_id) or sender not in ('Owner','Shared',*(n for n,_,_ in STAFF)):raise ValueError()
                     composing=self.path=='/api/compose'
                     if composing:
-                        from staff_email import valid_address
+                        from staff.staff_email import valid_address
                         to=str(data.get('to','')).strip();subject=str(data.get('subject','')).strip()
                         if not valid_address(to) or not subject or '\r' in subject or '\n' in subject:raise ValueError()
                         original={'replyTo':to,'subject':subject,'messageId':None,'references':None}

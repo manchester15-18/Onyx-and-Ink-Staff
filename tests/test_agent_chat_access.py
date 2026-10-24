@@ -5,8 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
 from email.message import Message
-from agent_chat import AgentChat, TelegramBridge, concise_reply, telegram_markup
-from dashboard_access import Access, setup
+from staff.agent_chat import AgentChat, TelegramBridge, concise_reply, telegram_markup
+from staff.dashboard_access import Access, setup
 import threading
 import time
 

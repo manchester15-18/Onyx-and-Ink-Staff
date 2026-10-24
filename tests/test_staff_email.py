@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from email import policy
 from email.parser import BytesParser
-from staff_email import StaffMail, STAFF,default_signatures,save_signature_settings,signature_settings,reset_signature_settings
+from staff.staff_email import StaffMail, STAFF,default_signatures,save_signature_settings,signature_settings,reset_signature_settings
 
 ADDRESSES={name:f'{name.lower()}@example.com' for name in (*STAFF,'Owner')}
 

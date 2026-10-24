@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from report_projects import active_project, create_report, delete_project, delete_report, ensure_project, migrate_legacy_reports, projects, consolidate_assignment_reports, repair_agent_report_tree
+from staff.report_projects import active_project, create_report, delete_project, delete_report, ensure_project, migrate_legacy_reports, projects, consolidate_assignment_reports, repair_agent_report_tree
 
 
 class ReportProjectTests(unittest.TestCase):

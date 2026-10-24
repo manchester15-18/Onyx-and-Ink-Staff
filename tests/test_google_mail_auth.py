@@ -5,9 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from google_mail_auth import GoogleMailAuth
+from staff.google_mail_auth import GoogleMailAuth
 from inbox_monitor import InboxMonitor
-from staff_email import StaffMail, STAFF
+from staff.staff_email import StaffMail, STAFF
 
 class OAuthTests(unittest.TestCase):
     def test_protocol_payload_and_empty_challenge(self):
@@ -43,7 +43,7 @@ class OAuthTests(unittest.TestCase):
                 self.assertNotIn('sensitive detail',str(error.exception))
 
     def test_setup_reports_api_disabled_without_response_secrets(self):
-        from google_mail_auth import main
+        from staff.google_mail_auth import main
         with tempfile.TemporaryDirectory() as d:
             client=Path(d)/'client.json'
             client.write_text(json.dumps({'installed':{'client_id':'test'}}))

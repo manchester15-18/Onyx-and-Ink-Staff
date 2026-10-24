@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from report_records import export_google_doc, is_reference_report, metadata, report_pdf
+from staff.report_records import export_google_doc, is_reference_report, metadata, report_pdf
 
 
 class ReportRecordTests(unittest.TestCase):

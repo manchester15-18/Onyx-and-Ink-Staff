@@ -7,9 +7,9 @@ import uuid
 from pathlib import Path
 from unittest.mock import ANY,Mock,patch
 from PIL import Image
-from agent_actions import Actions
-from agent_chat import AgentChat
-from design_images import generate
+from staff.agent_actions import Actions
+from staff.agent_chat import AgentChat
+from staff.design_images import generate
 
 CFG='''STAFF_EMAIL_MODE=send
 MORGAN_EMAIL=coo@example.com

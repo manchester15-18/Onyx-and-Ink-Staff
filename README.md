@@ -1,5 +1,7 @@
 # Onyx and Ink Staff — Cloud models
 
+Source layout: reusable application services are in staff/; the dashboard, assignment runner, and inbox monitor remain as root entry points. See docs/ARCHITECTURE.md.
+
 ## Role-specific cloud models
 
 The application now routes Morgan to Groq, Avery to Cerebras, Cameron to Gemini, and Jordan to Cloudflare with Mistral as a coding backup. Unconfigured or unavailable providers fall back through configured Groq, Cerebras, and Cloudflare connections, then OpenRouter's `openrouter/free` router as the final cloud fallback. No local models are installed or used. A cloud fallback cannot guarantee availability when every service is unavailable.
@@ -175,7 +177,7 @@ The project now uses `GOOGLE_MAIL_AUTH=oauth` and `GOOGLE_MAIL_USER=inbox@onyxan
 6. Run the following from the project folder:
 
 ```bash
-docker compose -f deploy/windows/compose.yml exec -T dashboard python google_mail_auth.py
+docker compose -f deploy/windows/compose.yml exec -T dashboard python -m staff.google_mail_auth
 ```
 
 Sign in as `inbox@onyxandink.org` and authorize access. Setup confirms the mailbox matches that account before saving `work/google-mail-token.json` with owner-only file permissions. The client file and token directory are ignored by Git. The monitor refreshes expiring access tokens automatically; revoked/expired refresh authorization requires repeating setup.
@@ -215,7 +217,7 @@ Autonomous assignments use Groq and Tavily allowances. All four agents share one
 
 Use Refresh inbox to load the latest 25 emails from Gmail. Open a message to read its text and attachment names. HTML is converted to text; remote images and scripts are never rendered. Opening here does not mark Gmail messages read. Open attachments in Gmail. Reply as CEO or a named agent; recipients come from the original sender, and personal Gmail is BCC'd. Draft mode saves locally; Live sends after your click and confirmation. Manual replies do not use Groq. Manual send reservations prevent duplicate delivery on retries; unconfirmed outcomes require review, not automatic resend. Existing autonomous monitoring can still reply separately; Stop it before manually handling mail if you want to avoid both responses.
 
-The inbox uses the existing Gmail authorization. If Google revokes or expires it, rerun `google_mail_auth.py`. Open the dashboard on this Windows PC at http://localhost:8765 or use its configured LAN address. To stop the background dashboard, run `deploy\windows\stop.ps1`. Stop the monitor in the dashboard first.
+The inbox uses the existing Gmail authorization. If Google revokes or expires it, rerun `staff.google_mail_auth`. Open the dashboard on this Windows PC at http://localhost:8765 or use its configured LAN address. To stop the background dashboard, run `deploy\windows\stop.ps1`. Stop the monitor in the dashboard first.
 
 ## Website pages, inbox switching, and delivery tracking
 
@@ -235,7 +237,7 @@ For Telegram, privately message the official @BotFather, use /newbot, and copy t
 
 GitHub receives application code, dashboard assets, tests, dependency requirements, and this guide. Local `.env` credentials, Google authorization, Wi-Fi passwords/private keys, emails, chat history, generated reports, temporary files, and the Python environment are excluded. This is a code backup; those private runtime files require a separate secure backup.
 
-`github_sync.py` checks exportable files for configured secrets and common key formats before committing and pushing to `main`. It refuses unexpected tracked files, symlinks, existing staged work, credentials embedded in a remote URL, or remote changes requiring a merge. It never force pushes. Automated checks run through the Codex recurring task once GitHub setup is finished. The Windows PC and Codex must be available for scheduled runs; offline changes sync when a later run succeeds.
+`staff.github_sync` checks exportable files for configured secrets and common key formats before committing and pushing to `main`. It refuses unexpected tracked files, symlinks, existing staged work, credentials embedded in a remote URL, or remote changes requiring a merge. It never force pushes. Automated checks run through the Codex recurring task once GitHub setup is finished. The Windows PC and Codex must be available for scheduled runs; offline changes sync when a later run succeeds.
 
 
 ## Actions from staff chat
@@ -247,7 +249,7 @@ Configure Cloudflare on the host Windows PC in **Settings → Cloudflare designs
 Use **Settings → Connect Google Workspace** on the host Windows PC. For automatic Workspace creation, enable Google Drive, Docs, Sheets, Slides, and Calendar APIs in the existing OAuth client project, then run:
 
 ```bash
-docker compose -f deploy/windows/compose.yml exec -T dashboard python workspace_tools.py --authorize
+docker compose -f deploy/windows/compose.yml exec -T dashboard python -m staff.workspace_tools --authorize
 ```
 
 Sign in as the shared Workspace account. Mail authorization is separate. Staff access is limited to files the application creates or is explicitly granted through drive.file, and owned calendar events. No calendar invitations are sent. Existing documents are not overwritten by chat; it currently creates new files.

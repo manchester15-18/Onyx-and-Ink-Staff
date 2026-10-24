@@ -11,7 +11,7 @@ import hashlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from report_projects import active_project
+from staff.report_projects import active_project
 
 DEFAULT_OBJECTIVE='''Work only from the active project overview, consolidated report, current role reports, and assigned staff tasks. Treat approved facts as binding; treat assumptions, placeholders, and open decisions as unapproved. Work in dependency order: Morgan maintains one decision/dependency register and assigns the next concrete task; Jordan converts verified product and technical facts into tested Preview-ready work; Avery refines one current customer-facing copy or asset draft from verified facts; Cameron completes one current policy or compliance section with placeholders where a CEO decision is still needed. Update the existing role report or project document instead of creating duplicates. Record evidence, the next owner, and the remaining blocker. Do not publish to production, invent pricing, inventory, delivery promises, policy positions, or campaign claims. If a CEO decision truly blocks further useful work, Morgan sends one concise decision packet with the options, recommendation, impact, and exact approval needed; otherwise continue the next unblocked task.'''
 BUSINESS_TZ=ZoneInfo('America/New_York')
@@ -79,7 +79,7 @@ class StaffAutonomy:
         try:overview=(folder/'overview.md').read_text(encoding='utf-8')
         except OSError:overview=''
         try:
-            from staff_tasks import status as task_status
+            from staff.staff_tasks import status as task_status
             tasks=[{'id':item.get('id'),'to':item.get('to'),'text':item.get('text'),'updated':item.get('updated')}
                    for item in task_status(self.root,100)
                    if item.get('project')==project_id and item.get('status') in ('pending','in_progress')]

@@ -15,9 +15,9 @@ os.environ.setdefault('CREWAI_TELEMETRY_DISABLED', 'true')
 os.environ.setdefault('OTEL_SDK_DISABLED', 'true')
 import main
 import httpx
-from groq_llm import GroqLLM, RequestBudget
+from staff.groq_llm import GroqLLM, RequestBudget
 from openai import OpenAI
-from staff_email import StaffMail, STAFF
+from staff.staff_email import StaffMail, STAFF
 
 
 class GroqTests(unittest.TestCase):

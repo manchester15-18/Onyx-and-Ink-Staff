@@ -5,8 +5,8 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import Mock,patch
-from staff_autonomy import StaffAutonomy,in_window,report_context
-from report_projects import ensure_project, save_project_overview
+from staff.staff_autonomy import StaffAutonomy,in_window,report_context
+from staff.report_projects import ensure_project, save_project_overview
 
 
 class StaffAutonomyTests(unittest.TestCase):

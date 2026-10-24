@@ -6,8 +6,8 @@ import time
 from email.utils import parseaddr
 from dotenv import dotenv_values
 import requests
-from google_mail_auth import GoogleMailAuth
-from inbox_state import InboxState
+from staff.google_mail_auth import GoogleMailAuth
+from staff.inbox_state import InboxState
 
 class Mailbox:
     def __init__(self, root):
@@ -40,7 +40,7 @@ class Mailbox:
                 if not isinstance(page_token,str) or len(page_token)>500 or not re.fullmatch('[A-Za-z0-9_-]+',page_token):raise ValueError('Invalid inbox page.')
                 params['pageToken']=page_token
             if mailbox not in ('all','Shared'):
-                from staff_email import valid_address
+                from staff.staff_email import valid_address
                 address=config.get(names[mailbox],'')
                 if not valid_address(address):raise ValueError('Inbox address is not configured.')
                 params['q']='{in:inbox in:sent} {to:'+address+' cc:'+address+'}'

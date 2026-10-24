@@ -4,7 +4,7 @@ import re
 import shutil
 import uuid
 from pathlib import Path
-from report_format import normalize_report, standardize_staff_report
+from staff.report_format import normalize_report, standardize_staff_report
 
 DEFAULT_PROJECT = "onboarding"
 DEFAULT_LABEL = "Onyx & Ink Priorities"
@@ -97,7 +97,7 @@ def save_project_overview(root, project, body):
     if not re.search(r'(?m)^#\s+',body):body='# '+label+' — Project Overview\n\n'+body
     path=folder/OVERVIEW_FILE
     _write_report(path,body)
-    from report_records import metadata_many
+    from staff.report_records import metadata_many
     metadata_many(root,[path])
     return {'project':slug,'project_name':label,'body':body}
 
@@ -145,7 +145,7 @@ def create_report(root,project,agent,title,body):
     path=folder/'manual'/agent.lower()/(project_slug(title)+'.md')
     if not re.search(r'(?m)^#\s+',body):body='# '+title+'\n\n'+body
     existed=path.exists();_write_report(path,body)
-    from report_records import metadata_many
+    from staff.report_records import metadata_many
     metadata_many(root,[path])
     return {'id':str(path.relative_to(Path(root)/'reports')),'project':slug,'project_name':label,'updated':existed}
 
@@ -171,7 +171,7 @@ def consolidated_project_report(root,project=None):
             sections.extend(['','## '+role,'',body or 'No current update saved.'])
     target=folder/'consolidated-project-report.md';existing=target.exists()
     _write_report(target,'\n'.join(sections))
-    from report_records import metadata_many
+    from staff.report_records import metadata_many
     metadata_many(root,[target])
     return {'project':slug,'project_name':label,'id':str(target.relative_to(Path(root)/'reports')),'updated':existing,'path':target}
 
@@ -242,7 +242,7 @@ def consolidate_assignment_reports(root,project):
             directory.replace(target);moved+=1
         try:assignments.rmdir()
         except OSError:pass
-    from report_records import metadata_many
+    from staff.report_records import metadata_many
     metadata_many(root,[folder/OVERVIEW_FILE,*current.glob('*.md')])
     summary=consolidated_project_report(root,slug)
     return {'project':slug,'moved':moved,'updated':updated,'archived_legacy_reports':repaired['archived'],'recovered_legacy_reports':repaired['recovered'],'consolidated':summary['id']}

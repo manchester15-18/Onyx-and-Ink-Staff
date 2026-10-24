@@ -26,13 +26,13 @@ from dotenv import load_dotenv, dotenv_values
 from crewai import Agent, Task
 from crewai.tools import tool
 from openai import APIConnectionError, APIStatusError
-from groq_llm import GroqLLM
-from model_routing import RoutingError
-from staff_email import StaffMail
-from report_format import normalize_report, standardize_staff_report
-from report_projects import active_project, ensure_project, consolidate_assignment_reports, project_context
-from staff_tasks import claim as claim_staff_task, complete as complete_staff_task, release as release_staff_task
-from web_research import WebResearchError, search as tavily_search, verify as verify_tavily
+from staff.groq_llm import GroqLLM
+from staff.model_routing import RoutingError
+from staff.staff_email import StaffMail
+from staff.report_format import normalize_report, standardize_staff_report
+from staff.report_projects import active_project, ensure_project, consolidate_assignment_reports, project_context
+from staff.staff_tasks import claim as claim_staff_task, complete as complete_staff_task, release as release_staff_task
+from staff.web_research import WebResearchError, search as tavily_search, verify as verify_tavily
 
 DEFAULT_DIRECTIVE = "Plan our upcoming custom gift product push for Onyx and Ink. Provide a coordinated operational plan."
 DEPARTMENT_RULES = (
@@ -297,7 +297,7 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
     web = Agent(role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
     legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, **common)
     coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
-    from model_routing import RoutedLLM
+    from staff.model_routing import RoutedLLM
     if isinstance(llm,RoutedLLM):
         for name,agent in (('Avery',marketing),('Jordan',web),('Cameron',legal),('Morgan',coo)):agent.llm=llm.for_agent(name)
     if mail and mail.mode != "off":
@@ -405,7 +405,7 @@ def main(argv=None):
                 return 1
         mail = StaffMail.from_env(PROJECT_DIR)
         search_key = credential("TAVILY_API_KEY", required=False)
-        from model_routing import RoutedLLM, routing_status
+        from staff.model_routing import RoutedLLM, routing_status
         cfg={**os.environ,**dotenv_values(PROJECT_DIR/'.env')}
         # Staff runs are background work.  The router keeps part of each provider's
         # minute budget available for CEO conversations in Telegram and the dashboard.
@@ -437,7 +437,7 @@ def main(argv=None):
         # must never be misreported as a cloud-model outage.
         consolidate_assignment_reports(PROJECT_DIR,project_id)
         try:
-            from report_records import export_consolidated_project
+            from staff.report_records import export_consolidated_project
             export_consolidated_project(PROJECT_DIR,project_id)
             drive_detail=' The consolidated project report was updated in Google Drive.'
         except (RuntimeError, ValueError, OSError):

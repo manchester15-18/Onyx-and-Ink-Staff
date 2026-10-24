@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 
 from unittest.mock import patch
-from workspace_tools import Workspace,WorkspaceSetupError,verified_account
+from staff.workspace_tools import Workspace,WorkspaceSetupError,verified_account
 
 
 class WorkspaceToolsTests(unittest.TestCase):

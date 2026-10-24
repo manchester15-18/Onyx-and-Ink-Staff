@@ -15,12 +15,12 @@ from pathlib import Path
 from urllib.parse import urlparse
 import requests
 from dotenv import dotenv_values
-from workspace_tools import Workspace
-from staff_email import StaffMail, STAFF, valid_address
-from report_projects import active_project, ensure_project, project_slug, project_context, project_overview, save_project_overview, consolidated_project_report
-from report_format import standardize_staff_report
-from storefront import Storefront
-from staff_tasks import enqueue as enqueue_staff_task
+from staff.workspace_tools import Workspace
+from staff.staff_email import StaffMail, STAFF, valid_address
+from staff.report_projects import active_project, ensure_project, project_slug, project_context, project_overview, save_project_overview, consolidated_project_report
+from staff.report_format import standardize_staff_report
+from staff.storefront import Storefront
+from staff.staff_tasks import enqueue as enqueue_staff_task
 
 CATALOG = '''Actions (use exact names and argument keys):
 report {project:project name optional,title,text}; document {title,text}; word_document {title,text}; pdf {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]}; print_sheet {title,file_ids:[generated PNG/JPEG IDs]}; drive_search {query}; drive_download {id,name};
@@ -302,7 +302,7 @@ class Actions:
                 raise RuntimeError('Email delivery was unconfirmed by the SMTP server. The message is preserved in Outbox and was not reported as sent.')
             return {'result':result,'approval':'Sent automatically to an approved staff or external recipient.' if internal or autonomous_external else 'Review in Outbox and click Approve & send.','url':'/activity'}
         if action in ('inbox','read_email','reply_email','delete_email'):
-            from dashboard_mail import Mailbox
+            from staff.dashboard_mail import Mailbox
             box=Mailbox(self.root)
             if action=='inbox':
                 items=box.list(mailbox=self.agent,refresh=True)
@@ -336,7 +336,7 @@ class Actions:
             # Discord is the primary staff workspace when enabled. It provides
             # restricted role channels, threads, and normal file delivery.
             if str(cfg.get('DISCORD_ENABLED','')).lower()=='true' and cfg.get('DISCORD_BOT_TOKEN'):
-                from discord_bridge import DiscordBridge
+                from staff.discord_bridge import DiscordBridge
                 result=DiscordBridge(self.root,None,None).send(self.agent,message,files,recipient)
                 if recipient:
                     task=enqueue_staff_task(self.root,self.agent,recipient,message,active_project(self.root)[0])
@@ -359,8 +359,8 @@ class Actions:
             return result
         if action=='square_import_website':
             if self.agent!='Jordan':raise ValueError('Only Jordan manages Square catalog imports.')
-            from square_commerce import SquareCommerce
-            from website_catalog import collect,download_image
+            from staff.square_commerce import SquareCommerce
+            from staff.website_catalog import collect,download_image
             square=SquareCommerce(self.root)
             if not square.configured:raise ValueError('Connect Square in Settings before importing products.')
             url=str(a.get('url') or dotenv_values(self.root/'.env').get('BUSINESS_WEBSITE','')).strip()
@@ -413,7 +413,7 @@ class Actions:
                 image=(str(image_id),path.name)
             product=self.storefront.update(a,image=image)
             if product['status']=='published':
-                from square_commerce import SquareCommerce
+                from staff.square_commerce import SquareCommerce
                 square=SquareCommerce(self.root)
                 if not square.configured:
                     product['status']='ready'
@@ -484,7 +484,7 @@ class Actions:
             cfg=dotenv_values(self.root/'.env');key=cfg.get('TAVILY_API_KEY')
             if not key:raise ValueError('Web research needs a Tavily API key in Settings.')
             if action=='search':
-                from web_research import search
+                from staff.web_research import search
                 return {'untrusted_web_content':search(self.root,self.text(a,'query',500),max_results=5)}
             else:
                 target=self.text(a,'url',1500);p=urlparse(target)
@@ -498,7 +498,7 @@ class Actions:
                 if not r.ok:raise RuntimeError('Webpage research failed; check Tavily authorization and credits.')
                 return {'untrusted_web_content':json.dumps(r.json())[:6500]}
         if action=='design':
-            from design_images import generate
+            from staff.design_images import generate
             model=a.get('model','schnell')
             reference=self.file(a['reference_file_id']) if a.get('reference_file_id') else None
             if reference and reference.suffix!='.png':raise ValueError('Choose a generated design as the reference.')

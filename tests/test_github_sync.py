@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-import github_sync
+import staff.github_sync
 
 class BackupTests(unittest.TestCase):
     def test_expected_oracle_deployment_files_are_allowlisted(self):

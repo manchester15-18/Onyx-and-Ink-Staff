@@ -191,7 +191,7 @@ class StaffMail:
         if method not in ('password', 'oauth'):
             raise ValueError('GOOGLE_MAIL_AUTH must be oauth or password.')
         if method == 'oauth':
-            from google_mail_auth import GoogleMailAuth
+            from staff.google_mail_auth import GoogleMailAuth
             oauth = GoogleMailAuth(project_dir, get('GOOGLE_MAIL_USER', ''))
         website=(get('BUSINESS_WEBSITE') or 'https://onyxandink.org').strip().rstrip('/')
         signatures=signature_settings(project_dir,addresses,website)

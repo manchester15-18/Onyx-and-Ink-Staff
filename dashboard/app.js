@@ -87,7 +87,7 @@ function liveAgentState(name){
   return['Free',details||('Ready for the next assignment.'+when),'busy'];
 }
 function attention(){const items=[],bad=S.activity.filter(isBad).length,drafts=S.activity.filter(a=>a.status==='draft').length;
-  if(!S.authorized)items.push(['need','Google sign-in needed','Run google_mail_auth.py on the Windows PC.','settings']);
+  if(!S.authorized)items.push(['need','Google sign-in needed','Run python -m staff.google_mail_auth on the Windows PC.','settings']);
   if(S.enabled&&!S.monitor)items.push(['need','Monitor is not running','Background monitoring is enabled but stopped.','settings']);
   if(bad)items.push(['need',bad+' send'+(bad>1?'s':'')+' unconfirmed','Review and dismiss, or check delivery.','activity']);
   if(drafts)items.push(['w',drafts+' outside draft'+(drafts>1?'s':'')+' to approve','These messages are not sent until you approve.','activity']);

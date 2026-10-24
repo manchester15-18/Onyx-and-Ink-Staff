@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from report_format import normalize_report
+from staff.report_format import normalize_report
 
 BUSINESS_TZ = ZoneInfo('America/New_York')
 
@@ -110,7 +110,7 @@ def export_google_doc(root, identifier, force=False):
     digest = hashlib.sha256(body.encode()).hexdigest();key = str(path.relative_to(Path(root) / "reports"))
     if meta.get("googleDigest") == digest and meta.get("googleUrl"):
         return {"id": meta.get("googleId", ""), "url": meta["googleUrl"], "unchanged": True}
-    from workspace_tools import Workspace
+    from staff.workspace_tools import Workspace
     workspace = Workspace(root);identifier_doc = meta.get("googleId")
     text = _document_text(title, meta, body)
     if identifier_doc:
@@ -140,7 +140,7 @@ def auto_export_reference(root, path):
 
 def export_consolidated_project(root, project=None):
     """Export only the stable project summary, avoiding one Drive Doc per run."""
-    from report_projects import consolidated_project_report
+    from staff.report_projects import consolidated_project_report
     summary=consolidated_project_report(root,project)
     result=export_google_doc(root,summary['id'],force=True)
     return {**summary,'drive':result}

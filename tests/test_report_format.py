@@ -1,5 +1,5 @@
 import unittest
-from report_format import normalize_report, standardize_staff_report
+from staff.report_format import normalize_report, standardize_staff_report
 
 
 class ReportFormatTests(unittest.TestCase):

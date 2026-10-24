@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock,patch
 from PIL import Image
-from multimodal import prepare
-from model_routing import RoutedLLM,RoutingError
-from agent_chat import AgentChat
+from staff.multimodal import prepare
+from staff.model_routing import RoutedLLM,RoutingError
+from staff.agent_chat import AgentChat
 
 class MultimodalTests(unittest.TestCase):
     def setUp(self):

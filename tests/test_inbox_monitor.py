@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from staff_email import StaffMail, STAFF
+from staff.staff_email import StaffMail, STAFF
 from inbox_monitor import InboxMonitor, message_route, plain_body, owner_reply_context, continue_owner_reply,continue_staff_message
 
 ADDRESSES={n:f'{n.lower()}@example.com' for n in (*STAFF,'Owner')}
