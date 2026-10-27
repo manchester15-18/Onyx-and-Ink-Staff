@@ -6,16 +6,20 @@
 # What it does, in order:
 #   1. Fetch origin/main.
 #   2. If the PC is already up to date, log and exit 0.
-#   3. If the working tree is dirty, staged, mid-merge, on another branch,
-#      or diverged from origin/main, log and SKIP (exit 0) — never force
-#      a merge, never overwrite local work. This is deliberate: the PC
-#      is also the source of the nightly github_sync backup, which stops
-#      on remote changes for human review.
-#   4. Otherwise, pull with --ff-only.
-#   5. Build the dashboard image FIRST. Only if the build succeeds does
+#   3. If the PC is AHEAD of origin/main (remote is an ancestor of HEAD),
+#      log that and exit 0 — no pull is needed, even if the working
+#      tree is dirty. "Ahead" is not "diverged".
+#   4. If the working tree is dirty, staged, mid-merge, on another branch,
+#      or truly diverged from origin/main (neither side is an ancestor
+#      of the other), log and SKIP (exit 0) — never force a merge, never
+#      overwrite local work. This is deliberate: the PC is also the
+#      source of the nightly github_sync backup, which stops on remote
+#      changes for human review.
+#   5. Otherwise, pull with --ff-only.
+#   6. Build the dashboard image FIRST. Only if the build succeeds does
 #      it run `docker compose up -d`, so a failed build does not take
 #      down the running dashboard.
-#   6. Log the result to work/auto-update.log (gitignored runtime data).
+#   7. Log the result to work/auto-update.log (gitignored runtime data).
 #
 # Parameters:
 #   -ComposeFile  Compose file to update. Default is the Tailscale file
@@ -86,11 +90,20 @@ try {
         Exit-Logged 0 "OK: Already up to date at $localHead."
     }
 
-    # Diverged (local commits not on remote, or remote not a descendant):
-    # skip, do not merge automatically.
+    # Ahead: remote is already contained in HEAD, so no pull is needed.
+    # Check this BEFORE the clean-tree check, so a dirty tree does not
+    # mask an ahead state with a misleading "diverged" message.
+    git merge-base --is-ancestor "origin/$Branch" HEAD 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        $aheadCount = (git rev-list --count "origin/$Branch..HEAD").Trim()
+        Exit-Logged 0 "OK: Ahead of origin/$Branch by $aheadCount commit(s); already contains remote, no pull needed."
+    }
+
+    # Truly diverged: neither side is an ancestor of the other.
+    # Skip, do not merge automatically.
     git merge-base --is-ancestor HEAD "origin/$Branch" 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Exit-Logged 0 "SKIP: Local and origin/$Branch have diverged. Review manually; no automatic merge."
+        Exit-Logged 0 "SKIP: Local and origin/$Branch have diverged (neither is an ancestor of the other). Review manually; no automatic merge."
     }
 
     $dirty = git status --porcelain
