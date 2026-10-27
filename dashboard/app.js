@@ -23,7 +23,7 @@ if($('loginForm')){
   return;
 }
 
-const PAGES=['overview','inbox','activity','reports','files','settings'],TITLES={activity:'Outbox',reports:'Staff reports'};
+const PAGES=['overview','inbox','activity','reports','files','live','settings'],TITLES={activity:'Outbox',reports:'Staff reports',live:'Live terminal'};
 const SENDERS=['Owner','Shared','Morgan','Avery','Jordan','Cameron'];
 const FAILED=/^I could not reach (?:the AI service|a compatible cloud)/;
 let S=null,sig='',page='',agent='Morgan',inboxLoaded=false,inboxBusy=false,opened=null,replyId=null,composeId=null,chatBusy=false,drafting=false,repFilter='all',repIdx=null,reportProject='',pal=0,signaturesReady=false,autonomyReady=false,modelSettingsReady=false;
@@ -207,6 +207,11 @@ function showPage(){let p=location.pathname.split('/')[1]||'overview';if(!PAGES.
 function navigate(p){history.pushState({},'','/'+p);showPage()}
 document.querySelectorAll('[data-nav]').forEach(a=>a.addEventListener('click',e=>{if(e.metaKey||e.ctrlKey)return;e.preventDefault();navigate(a.dataset.nav)}));
 addEventListener('popstate',showPage);
+let liveTimer=null;
+async function fetchLive(){try{const r=await fetch('/api/live-terminal');if(!r.ok)return;const d=await r.json();if(!$('liveOutput'))return;$('liveStatus').textContent=d.status+(d.exitCode!==null&&d.exitCode!==undefined?' (exit '+d.exitCode+')':'');$('liveCommand').textContent=d.command||'';if($('liveWatcher'))$('liveWatcher').textContent=d.watcherAlive?'PC watcher: online':'PC watcher: offline - commands queue until the watcher starts on the PC';if($('liveQueue'))$('liveQueue').textContent=d.queued?('Queued: '+d.queued):'';const out=$('liveOutput');const nearBottom=out.scrollHeight-out.scrollTop-out.clientHeight<80;out.textContent=d.output||'No live session yet.';if(nearBottom)out.scrollTop=out.scrollHeight}catch{}}
+function liveTick(){if(location.pathname==='/live'&&$('liveOutput'))fetchLive()}
+if(!liveTimer)liveTimer=setInterval(liveTick,1500);
+if($('liveRefresh'))$('liveRefresh').addEventListener('click',fetchLive);if($('liveRun'))$('liveRun').addEventListener('click',async()=>{const v=$('liveCommandInput').value.trim();if(!v){toast('Enter a command first.','bad');return}try{const j=await api('live-terminal-run',{command:v});toast('Queued: '+j.command);$('liveCommandInput').value='';fetchLive()}catch(e){toast(e.message,'bad')}});if($('liveCommandInput'))$('liveCommandInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('liveRun').click()});
 function pickAgent(n){agent=n;$('chatAgent').value=n;$('cw').textContent=n;syncDrafter();render();loadChat()}
 const drafter=()=>{const v=$('replySender').value;return S&&S.agents.some(a=>a.name===v)?v:agent};
 function syncDrafter(){$('draftWho').textContent=drafter()}

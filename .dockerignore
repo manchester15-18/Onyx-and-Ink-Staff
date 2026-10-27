@@ -18,3 +18,12 @@ Archive.zip
 __pycache__
 .DS_Store
 google-oauth-client.json
+# The dashboard can manage the storefront source, but its local package cache,
+# repository history, and browser-review artifacts do not belong in this image.
+cloudflare-storefront/node_modules
+cloudflare-storefront/.git
+cloudflare-storefront/.playwright
+cloudflare-storefront/.playwright-cli
+cloudflare-storefront/.taste-review
+cloudflare-storefront/.taste-skill
+cloudflare-storefront/.wrangler

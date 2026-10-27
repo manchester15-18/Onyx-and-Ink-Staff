@@ -34,7 +34,7 @@ class MultimodalTests(unittest.TestCase):
             with self.assertRaises(RoutingError):llm.call([{'role':'user','content':[{'type':'image_url','image_url':{'url':'http://localhost/private'}}]}])
             post.assert_not_called()
     def test_vision_fallback_keeps_images_and_zero_price_constraint(self):
-        llm=RoutedLLM(self.root,{'GROQ_API_KEY':'g','CEREBRAS_API_KEY':'c','OPENROUTER_API_KEY':'o'},'Avery',max_tokens=20)
+        llm=RoutedLLM(self.root,{'AVERY_PROVIDER':'groq','GROQ_API_KEY':'g','CEREBRAS_API_KEY':'c','OPENROUTER_API_KEY':'o'},'Avery',max_tokens=20)
         blocks,_=prepare([self.picture()]);failed=Mock(ok=False,status_code=429,headers={})
         reply=Mock(ok=True);reply.json.return_value={'choices':[{'message':{'content':'Red'}}]}
         with patch('model_routing.requests.post',side_effect=[failed,reply]) as post:

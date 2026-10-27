@@ -498,11 +498,17 @@ class Actions:
                 if not r.ok:raise RuntimeError('Webpage research failed; check Tavily authorization and credits.')
                 return {'untrusted_web_content':json.dumps(r.json())[:6500]}
         if action=='design':
-            from staff.design_images import generate
+            from staff.design_images import generate, generate_text_free
+            from staff.design_learning import infer_product
             model=a.get('model','schnell')
             reference=self.file(a['reference_file_id']) if a.get('reference_file_id') else None
             if reference and reference.suffix!='.png':raise ValueError('Choose a generated design as the reference.')
-            data=generate(self.root,self.clean(self.text(a,'prompt',2048)),model,reference=reference)
+            prompt=self.clean(self.text(a,'prompt',2048))
+            product=infer_product(prompt)
+            if product:
+                data=generate_text_free(self.root,prompt,model,reference=reference,product=product,agent=self.agent)
+            else:
+                data=generate(self.root,prompt,model,reference=reference)
             return self.save('Design by '+self.agent,data,'.png','design')
         raise ValueError('Unknown action "'+action+'". Choose an action from the available staff tools.')
 

@@ -246,11 +246,136 @@ class DirectAutonomousAssignment:
         return answer
 
 
+@tool("Generate a text-free tumbler design")
+def generate_tumbler_design(prompt: str) -> str:
+    """Generate a TEXT-FREE tumbler design with Cloudflare Flux. Input is a plain prompt string.
+    The tool appends no-text + tumbler-only guardrails automatically. Never ask it to render text, a brand name, or a personalization — add text afterwards with the overlay tool.
+    Returns the saved PNG path in work/artifacts/.
+    """
+    from staff.design_images import generate_text_free
+    import hashlib, time
+    data = generate_text_free(PROJECT_DIR, prompt)
+    name = hashlib.sha256(data).hexdigest()[:16] + ".png"
+    out = PROJECT_DIR / "work" / "artifacts" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    return f"TEXT-FREE DESIGN SAVED: {out} — add any text with the overlay tool, then run the pre-publish checklist before publishing."
+
+@tool("Overlay real text on a design")
+def overlay_design_text(image_path: str, text: str) -> str:
+    """Overlay REAL text on a design image with a real font (Pillow). This is the ONLY way to add a name, brand, or phrase to a design — never let an image model render text.
+    Input: image_path (existing PNG/JPEG in work/artifacts/) and text (max 60 characters).
+    Returns the saved PNG path.
+    """
+    from staff.design_tools import overlay_text
+    from pathlib import Path as _P
+    src = _P(image_path)
+    out = src.parent / (src.stem + "-overlay.png")
+    return f"OVERLAY SAVED: {overlay_text(src, out, text)}"
+
+@tool("Build a 300-DPI print wrap")
+def build_print_wrap(image_path: str) -> str:
+    """Build a 300-DPI print wrap (2790x2460 px) from a design image. The template is a common 20oz straight skinny starting size (9.3 x 8.2 in), NOT a verified blank size — measure the actual blank before printing.
+    Returns the saved PNG path and dimensions.
+    """
+    from staff.design_tools import build_wrap
+    from pathlib import Path as _P
+    src = _P(image_path)
+    out = src.parent / (src.stem + "-wrap.png")
+    result = build_wrap(src, out)
+    return f"WRAP SAVED: {result['output']} ({result['width_px']}x{result['height_px']} px at {result['dpi']} DPI). WARNING: {result['warning']}"
+
+@tool("Run the pre-publish design checklist")
+def design_checklist(image_path: str) -> str:
+    """Run the pre-publish checklist on a design image. A design passes ONLY if it is a tumbler (human-confirmed), has no AI-rendered text, and is PNG/JPEG at mockup resolution or better.
+    Input: image_path. This tool cannot auto-confirm the product — Avery must look at the image and confirm it is a tumbler before claiming a pass.
+    """
+    from staff.design_tools import pre_publish_checklist
+    passed, checks = pre_publish_checklist(image_path)
+    lines = [f"PRE-PUBLISH CHECKLIST: {'PASS' if passed else 'FAIL'}"]
+    lines.extend(f"{status}: {name} — {detail}" for status, name, detail in checks)
+    return "\n".join(lines)
+
+@tool("Critique a design")
+def critique_design_tool(image_path: str, product: str, verdict: str, what_was_right: str, what_was_wrong: str, suggested_fix: str, agent: str = "Avery") -> str:
+    """Critique a generated design and turn the critique into a lesson for the next generation. Avery must look at the image first and report honestly what is right and what is wrong.
+    Inputs: image_path, product name, verdict (pass/partial/fail), what_was_right, what_was_wrong, suggested_fix (the prompt change that should prevent the wrong part next time; empty if none).
+    The critique is saved to work/design-critiques.jsonl and the suggested fix becomes a lesson in work/design-lessons.json, automatically applied to the next generation for that product.
+    """
+    from staff.design_learning import critique_design
+    record = critique_design(PROJECT_DIR, image_path, product, verdict, what_was_right, what_was_wrong, suggested_fix=suggested_fix, text_found=("text" in what_was_wrong.lower() or "$" in what_was_wrong), agent=agent)
+    return f"CRITIQUE SAVED: {record['verdict']} for {product}. Lessons added: {record['lessons_added'] or 'none'}. Checks: {record['checks']}"
+
+@tool("Generate a design with learned lessons")
+def generate_learned_design(prompt: str, product: str, agent: str = "Avery") -> str:
+    """Generate a design with all lessons learned from past critiques automatically applied. Use this for every new design, not the plain generation tool, so Avery keeps improving.
+    Inputs: prompt (plain description) and product name (e.g. tumbler, snow globe tumbler, keychain, pen, luggage tag, shirt, puzzle, bookmark, ornament).
+    Returns the saved PNG path in work/artifacts/.
+    """
+    from staff.design_images import generate_text_free
+    import hashlib
+    data = generate_text_free(PROJECT_DIR, prompt, product=product, agent=agent)
+    name = hashlib.sha256(data).hexdigest()[:16] + ".png"
+    out = PROJECT_DIR / "work" / "artifacts" / name
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(data)
+    return f"LEARNED DESIGN SAVED: {out} — critique it with the critique tool before publishing, so the next design gets even better."
+
+@tool("Visually inspect a design or file")
+def inspect_design_tool(image_path: str, expected_product: str, agent: str) -> str:
+    """Visually inspect an image file with a vision model. Use this for any design you generated, any file James or Donald placed in work/, or any downloaded image — do not claim a product, text, or brand fit you have not visually checked.
+    Inputs: image_path (PNG/JPEG/WebP in work/, e.g. work/artifacts/...), expected_product (what the image was supposed to be, or empty), agent (your own name: Avery, Jordan, Cameron, or Morgan).
+    Returns the product seen, ALL text exactly as spelled, blank personalization area, brand fit, verdict, and a suggested prompt fix. Feed that result into the critique tool so the next generation improves.
+    """
+    from staff.vision_inspect import inspect_image
+    result = inspect_image(PROJECT_DIR, image_path, agent=agent or "Avery", expected=expected_product or None)
+    return f"VISION INSPECTION by {result['agent']} for {result['image']}: product seen: {result['product_seen']}; text seen: {result['text_seen']}; blank area: {result['blank_area']}; brand fit: {result['brand_fit']}; verdict: {result['verdict_line']}; suggested fix: {result['suggested_fix']}. Raw: {result['raw']}"
+
+@tool("Approve a design as a quality reference")
+def approve_design_tool(image_path: str, product: str, notation: str, agent: str = "Avery", as_reference: str = "no") -> str:
+    """Approve a verified, high-quality design and optionally mark it as a quality reference standard for its product. Only approve after vision inspection + checklist + critique all pass, or after a human has looked at it — never approve your own unchecked design, and never approve a design with AI text or the wrong product.
+    Inputs: image_path, product, notation (why this is a good standard, what future designs should match), agent (your name), as_reference ("yes" to mark it as the standard, "no" for approved-only).
+    The approver is recorded as the calling agent unless a human approver is named in the notes — James's sign-off is the true production standard and he can revoke any approval.
+    """
+    from staff.design_approval import approve_design
+    record = approve_design(PROJECT_DIR, image_path, product, approver=agent, agent=agent,
+                            verified_by=["vision", "checklist", "critique"], notation=notation,
+                            notes=f"Approved via CrewAI tool by {agent}.", as_reference=(as_reference.lower() == "yes"))
+    return f"APPROVAL SAVED: {record['image_path']} status={record['status']} reference={record['reference']} notation={record['notation']}"
+
+@tool("List approved reference designs")
+def list_references_tool(product: str) -> str:
+    """List approved reference designs, optionally for one product. Use this before generating or judging a design, so you know the standard to match.
+    Input: product name, or empty for all references.
+    """
+    from staff.design_approval import get_references
+    refs = get_references(PROJECT_DIR, product or None)
+    if not refs:
+        return "No approved references found."
+    lines = [f"REFERENCES ({len(refs)}):"]
+    for r in refs:
+        lines.append(f"- {r['product']}: {r['image_path']} — {r['notation']} (approver: {r['approver']})")
+    return "\n".join(lines)
+
+@tool("Compare a design to its reference standard")
+def compare_reference_tool(image_path: str, product: str, agent: str = "Avery") -> str:
+    """Vision-compare a candidate design against the approved reference standard for its product. Use the first reference for that product; if none exists, say so and do not invent a standard.
+    Inputs: image_path (candidate), product, agent (your name).
+    Returns whether the candidate meets the reference standard, with differences.
+    """
+    from staff.design_approval import get_references
+    from staff.vision_inspect import compare_to_reference
+    refs = get_references(PROJECT_DIR, product)
+    if not refs:
+        return f"No approved reference exists for {product} — cannot compare. Approve a reference first."
+    result = compare_to_reference(PROJECT_DIR, image_path, refs[0]["image_path"], agent=agent, expected=product)
+    return f"REFERENCE COMPARISON vs {refs[0]['image_path']}: verdict={result['verdict']}. Raw: {result['raw']}"
+
 def build_assignments(llm, directive, report_dir, search_key=None, verbose=False, mail=None, progress=None, project_brief='', root=None, project_id=''):
     # CrewAI adds a large control prompt and multi-turn loop which the free cloud
     # routes reject before publishing a report. Autonomous work deliberately uses
     # a single bounded request; interactive staff retain their tool-capable flow.
-    if isinstance(llm, __import__('model_routing').RoutedLLM):
+    if isinstance(llm, __import__('staff.model_routing', fromlist=['RoutedLLM']).RoutedLLM):
         focuses={
             'Morgan':'Create a current dependency and decision register for the active project, with owners and next steps only.',
             'Avery':'Draft usable marketing copy or a campaign asset for the active project; do not claim campaign performance.',
@@ -293,10 +418,11 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
     # One deliberate model response prevents Crew from spending the whole free
     # tier on self-directed follow-up turns before it publishes any work.
     common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=1, verbose=verbose)
-    marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools], **common)
-    web = Agent(role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
-    legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=search_tools, **common)
-    coo = Agent(role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
+
+    marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools, generate_tumbler_design, overlay_design_text, build_print_wrap, design_checklist, critique_design_tool, generate_learned_design, inspect_design_tool, approve_design_tool, list_references_tool, compare_reference_tool], **common)
+    web = Agent(tools=[inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
+    legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=[*search_tools, inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], **common)
+    coo = Agent(tools=[inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
     from staff.model_routing import RoutedLLM
     if isinstance(llm,RoutedLLM):
         for name,agent in (('Avery',marketing),('Jordan',web),('Cameron',legal),('Morgan',coo)):agent.llm=llm.for_agent(name)

@@ -40,3 +40,14 @@ def generate(root,prompt,model='schnell',reference=None):
     with Image.open(io.BytesIO(data)) as image:
         if image.width*image.height>16_000_000:raise RuntimeError('Generated image dimensions exceed the limit.')
         image.load();output=io.BytesIO();image.convert('RGB').save(output,format='PNG');return output.getvalue()
+
+
+def generate_text_free(root, prompt, model='schnell', reference=None, product='tumbler', agent=None):
+    """Generate a TEXT-FREE tumbler design (audit fix, Oct 27).
+
+    Appends no-text + product-lock guardrails before calling generate(),
+    so the image model cannot garble text or switch products. Any text
+    must be added afterwards with design_tools.overlay_text (real font).
+    """
+    from staff.design_learning import full_learned_prompt
+    return generate(root, full_learned_prompt(root, prompt, product=product, agent=agent), model=model, reference=reference)

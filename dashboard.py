@@ -330,6 +330,25 @@ def configure_autonomy(data):
     return state,message
 
 
+def live_terminal():
+    base=ROOT/'work'/'live-terminal'
+    current={}
+    try:current=json.loads((base/'current.json').read_text())
+    except Exception:pass
+    output=''
+    try:output=(base/'output.log').read_bytes()[-102400:].decode(errors='replace')
+    except Exception:pass
+    queued=''
+    try:queued=json.loads((base/'request.json').read_text()).get('command','')
+    except Exception:pass
+    watcherAlive=False
+    try:
+        import time as _time
+        watcherAlive=(_time.time()-(base/'watcher.json').stat().st_mtime)<15
+    except Exception:pass
+    return {'status':current.get('status','idle'),'command':current.get('command',''),'startedAt':current.get('startedAt'),'endedAt':current.get('endedAt'),'exitCode':current.get('exitCode'),'output':output,'queued':queued,'watcherAlive':watcherAlive}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def allowed(self):
@@ -360,6 +379,7 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith('/api/'):return self.reply(401,{'error':'Sign in to the dashboard.'})
             return self.reply(200,(ROOT/'dashboard'/'login.html').read_bytes(),'text/html; charset=utf-8')
         if path=='/api/status':return self.reply(200,snapshot())
+        if path=='/api/live-terminal':return self.reply(200,live_terminal())
         if path=='/api/attachment':
             try:
                 args=parse_qs(urlparse(self.path).query);name,content=MAILBOX.attachment(args.get('id',[''])[0],args.get('part',[''])[0])
@@ -382,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
                 filename=re.sub(r'[^A-Za-z0-9._-]+','-',title).strip('-')[:100] or 'report'
                 return self.reply(200,content,'application/pdf',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename+'.pdf',safe='')})
             except (ValueError,OSError):return self.reply(404,{'error':'Report not found.'})
-        names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/files':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/files':'index.html','/live':'index.html','/app.js':'app.js','/style.css':'style.css','/preview-modern.html':'preview-modern.html'}
         if path not in names:return self.reply(404,{'error':'Not found.'})
         name=names[path];kind={'html':'text/html; charset=utf-8','js':'text/javascript','css':'text/css'}[name.split('.')[-1]]
         self.reply(200,(ROOT/'dashboard'/name).read_bytes(),kind)
@@ -409,6 +429,26 @@ class Handler(BaseHTTPRequestHandler):
             maximum=14_100_000 if self.path=='/api/upload' else 40000
             if length>maximum or length<0:raise ValueError()
             data=json.loads(self.rfile.read(length))
+            if self.path=='/api/live-terminal-run':
+                command=str(data.get('command','')).strip()
+                if not command or len(command)>2000:return self.reply(400,{'error':'Enter a command (max 2000 characters).'})
+                if any(ch in command for ch in ('&','|',';','>','<','`','$','(',')')):return self.reply(400,{'error':'One simple command only - no pipes, redirection, chaining, or substitutions.'})
+                lowered=command.lower()
+                if any(word in lowered for word in ('.env','authorized_keys','wifi-password','api_key','apikey','password','secret','token','ts_authkey')):return self.reply(400,{'error':'That command looks like it could print a secret. It was not queued.'})
+                if any(word in lowered for word in ('del ','remove-item','format ','shutdown','restart-computer')):return self.reply(400,{'error':'That command is blocked in the Live command box. Run it directly on the PC if you really mean it.'})
+                base=ROOT/'work'/'live-terminal';base.mkdir(parents=True,exist_ok=True)
+                try:current=json.loads((base/'current.json').read_text())
+                except Exception:current={}
+                if current.get('status')=='running':
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        started=_dt.fromisoformat(str(current.get('startedAt','')).replace('Z','+00:00'))
+                        stale=(_dt.now(_tz.utc)-started).total_seconds()>900
+                    except Exception:stale=False
+                    if not stale:return self.reply(409,{'error':'A command is already running. Wait for it to finish.'})
+                if (base/'request.json').exists():return self.reply(409,{'error':'A command is already queued.'})
+                tmp=base/'request.json.tmp';tmp.write_text(json.dumps({'command':command,'status':'pending'}));tmp.replace(base/'request.json')
+                return self.reply(200,{'queued':True,'command':command})
             if self.path=='/api/chat-history':return self.reply(200,{'messages':CHAT.history(data.get('agent','Morgan'))})
             if self.path=='/api/chat':
                 try:

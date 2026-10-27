@@ -29,6 +29,8 @@
 !/deploy/windows/*.cmd
 !/deploy/windows/*.sh
 !/deploy/windows/*.yml
+!/staff/
+!/staff/*.py
 # Private configuration and runtime data stay on this Windows PC.
 .env*
 !/.env.example
