@@ -14,6 +14,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt ./
 RUN python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+RUN python -m playwright install --with-deps chromium
 COPY . ./
 RUN mkdir -p /app/work /app/reports
 

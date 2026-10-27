@@ -371,6 +371,33 @@ def compare_reference_tool(image_path: str, product: str, agent: str = "Avery") 
     result = compare_to_reference(PROJECT_DIR, image_path, refs[0]["image_path"], agent=agent, expected=product)
     return f"REFERENCE COMPARISON vs {refs[0]['image_path']}: verdict={result['verdict']}. Raw: {result['raw']}"
 
+@tool("Screenshot a website")
+def screenshot_website_tool(url: str, agent: str = "Jordan") -> str:
+    """Screenshot a website's customer view in a real browser and save the PNG. Use this before claiming anything about how a page looks — raw HTML is not a customer view.
+    Input: url (full http(s) URL, e.g. the storefront preview). Returns the saved PNG path in work/website-audits/, page title, and final URL after redirects. Then use the website audit tool to inspect that screenshot with vision.
+    """
+    from staff.website_inspect import screenshot_website
+    from datetime import datetime, timezone
+    from urllib.parse import urlparse
+    import re
+    host = re.sub(r"[^A-Za-z0-9-]+", "-", urlparse(url).netloc.replace(".", "-")).strip("-") or "website"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    out = PROJECT_DIR / "work" / "website-audits" / f"{host}-{stamp}.png"
+    shot = screenshot_website(url, out)
+    return f"WEBSITE SCREENSHOT: {shot['path']} — title: {shot['title'] or 'unknown'}, final URL: {shot['final_url']}. Audit it with the website audit tool before reporting on the page."
+
+@tool("Visually audit a website (customer view)")
+def audit_website_tool(url: str, agent: str = "Jordan") -> str:
+    """Visually audit a website as a customer sees it: screenshot it in a real browser, then inspect the screenshot with a vision model for navigation, products/prices/CTAs, broken images, overlapping text, brand fit, and shopper-trust issues.
+    Input: url (full http(s) URL). Returns verdict PASS/PARTIAL/FAIL, issues, prioritised fixes, and the screenshot path as evidence. Never claim a page looks right without this audit.
+    """
+    from staff.website_inspect import inspect_website
+    result = inspect_website(PROJECT_DIR, url, agent=agent or "Jordan")
+    return (f"WEBSITE AUDIT by {result['agent']} for {result['url']} (final: {result['final_url']}, title: {result['title'] or 'unknown'}): "
+            f"page: {result['page_seen']}; navigation: {result['navigation']}; products/CTAs: {result['products_ctas']}; "
+            f"text: {result['text_issues']}; brand fit: {result['brand_fit']}; trust issues: {result['trust_issues']}; "
+            f"verdict: {result['verdict_line']}; fixes: {result['fixes']}. Screenshot: {result['screenshot']}. Raw: {result['raw']}")
+
 def build_assignments(llm, directive, report_dir, search_key=None, verbose=False, mail=None, progress=None, project_brief='', root=None, project_id=''):
     # CrewAI adds a large control prompt and multi-turn loop which the free cloud
     # routes reject before publishing a report. Autonomous work deliberately uses
@@ -420,7 +447,7 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
     common = dict(llm=llm, allow_delegation=False, max_retry_limit=0, max_iter=1, verbose=verbose)
 
     marketing = Agent(role="Avery - Marketing - Onyx and Ink", goal="Complete marketing, brand, campaign, audience, merchandising, and customer messaging work.", backstory="Your name is Avery. You own Marketing only. You do not accept Legal, HR, Web Development, or IT ownership. You oversee customizable tumblers, shirts, keychains, puzzles, and bookmarks from the marketing perspective. " + rules, tools=[check_blank_stock, *search_tools, generate_tumbler_design, overlay_design_text, build_print_wrap, design_checklist, critique_design_tool, generate_learned_design, inspect_design_tool, approve_design_tool, list_references_tool, compare_reference_tool], **common)
-    web = Agent(tools=[inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. " + rules, **common)
+    web = Agent(tools=[inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool, screenshot_website_tool, audit_website_tool], role="Jordan - Web Development and IT - Onyx and Ink", goal="Complete website, storefront, dashboard, integration, infrastructure, security, and technical specification work.", backstory="Your name is Jordan. You own Web Development and IT only. You do not accept Marketing, HR, or Legal ownership. You prepare implementation requirements for the storefront and internal systems. You can visually inspect a website's customer view with the website screenshot and audit tools — screenshot first, then audit, and never claim a page looks right without seeing it. " + rules, **common)
     legal = Agent(role="Cameron - HR and Legal - Onyx and Ink", goal="Complete HR, policy, compliance, contract, staffing, and people-operations work.", backstory="Your name is Cameron. You own HR and Legal only. You do not accept Marketing, Web Development, or IT ownership. Identify missing jurisdiction and professional-review needs; do not assume custom goods can always be non-refundable. " + rules, tools=[*search_tools, inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], **common)
     coo = Agent(tools=[inspect_design_tool, critique_design_tool, generate_learned_design, approve_design_tool, list_references_tool, compare_reference_tool], role="Morgan - Chief Operating Officer - Onyx and Ink", goal="Combine departmental recommendations into an actionable plan.", backstory="Your name is Morgan. You report to the CEO and prioritize departmental work, dependencies, owners, and decisions. " + rules, **common)
     from staff.model_routing import RoutedLLM
