@@ -23,3 +23,70 @@ dialog{width:min(620px,calc(100% - 34px));max-height:88vh;padding:30px;overflow:
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
 #reportBody{padding:clamp(24px,4vw,48px);overflow-wrap:anywhere;font:15px/1.7 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif}#reportBody h2{margin:0 0 22px;font-size:clamp(25px,3vw,36px);letter-spacing:-.025em}#reportBody h3{margin:30px 0 10px;font-size:19px}#reportBody h4{margin:24px 0 8px;font-size:16px}#reportBody p{margin:0 0 13px}#reportBody ul,#reportBody ol{margin:8px 0 20px;padding-left:24px}#reportBody li{margin:8px 0}#reportBody code{padding:2px 6px;border-radius:6px;background:var(--soft);font-size:.9em}#reportBody a{color:var(--blue);text-decoration:none}#reportBody a:hover{text-decoration:underline}
+
+/* Midnight Graphite theme (James pick, Oct 27 2026, from staff-dashboard-5-variants mock-up).
+   Appended override, not a rewrite: original light tokens above stay intact and this block
+   wins by order. Revert by deleting this block and the three index.html label/class edits.
+   Cyan is the accent; primary-button text is near-black on bright cyan for contrast. */
+:root{--ink:#f5f5f7;--secondary:#a1a1aa;--canvas:#17171c;--paper:#232329;--soft:#2e2e35;--line:rgba(255,255,255,.12);--blue:#22c1e6;--blueWash:rgba(34,193,230,.16);--green:#34d399;--orange:#fbbf24;--red:#ff6b5e;--shadow:0 24px 70px rgba(0,0,0,.5);--shadow2:0 10px 35px rgba(0,0,0,.4);color-scheme:dark}
+body{background:var(--canvas);color:var(--ink)}
+body:before{background:radial-gradient(55% 70% at 82% 0,rgba(34,193,230,.14),transparent 72%),radial-gradient(45% 60% at 10% 0,rgba(34,193,230,.07),transparent 70%)}
+::selection{background:rgba(34,193,230,.35)}
+a{color:var(--blue)}
+.topbar{border-bottom:1px solid var(--line);background:rgba(23,23,28,.78)}
+.nav{background:rgba(255,255,255,.07);box-shadow:inset 0 0 0 1px var(--line)}
+.nav a{color:#a1a1aa}
+.nav a:hover{color:#fff}
+.nav a.current{color:#fff;background:#2e2e35;box-shadow:0 3px 14px rgba(0,0,0,.4)}
+.kbd{border-color:var(--line);background:rgba(255,255,255,.06);color:var(--secondary)}
+.kbd:hover{background:#2e2e35}
+kbd{color:#71717a}
+.ag:hover{background:rgba(255,255,255,.06)}
+.ag.sel{background:#2e2e35;border-color:var(--line);box-shadow:0 7px 25px rgba(0,0,0,.4)}
+.card,.row,.tableWrap,.inbox,.projectToolbar,.draftCard,.att,.settingsPage>div:not(.row):not(.pageIntro){background:#232329;border-color:var(--line);box-shadow:var(--shadow2)}
+.card:before{background:var(--blueWash)}
+.card:hover,.row:hover{box-shadow:var(--shadow2)}
+.btn{background:var(--blue);color:#04161d}
+.btn:hover{background:#38d3f2;color:#04161d;box-shadow:0 9px 22px rgba(34,193,230,.25)}
+.btn.g{background:#2e2e35;color:var(--ink)}
+.btn.g:hover{background:#3a3a42;box-shadow:none}
+.btn.danger{background:rgba(255,107,94,.16);color:#ff8a7a;border:1px solid rgba(255,107,94,.4)}
+.btn:disabled{opacity:.38}
+input:not([type=checkbox]),select,textarea{border-color:#3f3f47;background:#2e2e35;color:var(--ink)}
+input::placeholder,textarea::placeholder{color:#71717a}
+input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{border-color:#22c1e6;box-shadow:0 0 0 4px rgba(34,193,230,.18)}
+input[type=checkbox]{accent-color:var(--blue)}
+th{background:#2a2a31;color:var(--secondary)}
+tbody tr:hover{background:#2a2a31}
+.tg{background:rgba(52,211,153,.16);color:var(--green)}
+.tg.w{background:rgba(255,107,94,.16);color:var(--red)}
+.tg.d{background:var(--soft);color:var(--secondary)}
+.list{background:rgba(35,35,41,.9)}
+.m:hover{background:#2e2e35;box-shadow:0 6px 20px rgba(0,0,0,.3)}
+.m.unread{background:#2a2a31;box-shadow:0 5px 17px rgba(0,0,0,.3)}
+.m.on{background:var(--blue);color:#04161d}
+.m.on small,.m.on .mailPreview{color:rgba(4,22,29,.72)}
+#reader{background:#232329}
+.reply{background:#2a2a31}
+.fileChip{background:var(--soft)}
+.empty{border-color:#3f3f47;color:var(--secondary)}
+.sk{background:linear-gradient(100deg,#2e2e35 30%,#3a3a42 50%,#2e2e35 70%)}
+.right{background:rgba(35,35,41,.92);border-color:rgba(255,255,255,.14)}
+.b{background:#2e2e35}
+.b.user{background:var(--blue);color:#04161d}
+dialog{background:rgba(35,35,41,.97);border-color:var(--line)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+#paletteInput{border-color:var(--line)}
+.pi.sel,.pi:hover{background:var(--blueWash)}
+#toasts .toast,.toast{background:rgba(42,42,49,.96);color:var(--ink);border-color:var(--line)}
+.loginPage{background:var(--canvas)}
+.loginPage form{background:rgba(35,35,41,.88);border-color:var(--line)}
+.loginAura{background:radial-gradient(circle at 35% 30%,#2e2e35,#164e63 30%,#0b0b0e 72%);box-shadow:0 30px 120px rgba(34,193,230,.18)}
+.hero{background:#0b0b0e}
+.hero:before{background:radial-gradient(650px 420px at 85% 40%,rgba(34,193,230,.28),transparent 63%),radial-gradient(460px 300px at 62% 100%,rgba(34,193,230,.12),transparent 68%)}
+.heroOrb{background:radial-gradient(circle at 35% 25%,#a5f3fc 0,#22c1e6 18%,#164e63 45%,#050509 73%);box-shadow:inset -35px -35px 70px rgba(0,0,0,.5),0 0 90px rgba(34,193,230,.3)}
+.heroOrb i{border-color:rgba(34,193,230,.3)}
+#liveOutput{background:#0b0b0e!important;color:#e4e4e7!important}
+.nd{background:rgba(255,107,94,.14)}
+.nd.w{background:rgba(251,191,36,.14)}
+.confirmGlyph{background:var(--blueWash);color:var(--blue)}
