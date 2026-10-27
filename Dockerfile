@@ -8,8 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8765
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git lsof procps ca-certificates \
+    && apt-get install -y --no-install-recommends git lsof procps ca-certificates nodejs npm \
     && rm -rf /var/lib/apt/lists/*
+
+# Node 20 LTS (Debian trixie package, 20.19.x) for npm-based Jordan tools:
+# npx skill installs, and the Impeccable detector when run via npm. The
+# detector itself also ships as a self-contained binary in the storefront,
+# so Node is an enabler, not a requirement of the detector binary.
+# Impeccable 4.7 is installed globally so Jordan's detector tool works in
+# this container without touching the storefront's node_modules.
+RUN npm install -g impeccable@4.7.0
 
 WORKDIR /app
 COPY requirements.txt ./

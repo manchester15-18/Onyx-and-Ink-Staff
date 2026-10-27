@@ -60,6 +60,7 @@ services:
       - ../../google-oauth-client.json:/app/google-oauth-client.json:ro
       - ../../work:/app/work
       - ../../reports:/app/reports
+      - ../../cloudflare-storefront:/app/storefront:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz',timeout=3).read()"]
       interval: 30s
