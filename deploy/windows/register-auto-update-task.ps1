@@ -9,8 +9,12 @@
 #   Task name:  "Onyx Staff Dashboard Auto-Update"
 #   Action:     powershell -ExecutionPolicy Bypass -File
 #               <project>\deploy\windows\auto-update.ps1
-#   Trigger:    Every 30 minutes, indefinitely, starting now.
+#   Trigger:    Every 30 minutes, for 1 year, starting now.
 #               (Pass -IntervalMinutes to change it, e.g. 60.)
+#               Task Scheduler rejects an "indefinite" repetition
+#               duration (it becomes a ~27-million-day XML duration,
+#               out of range, error 0x80041318). A 365-day duration is
+#               valid; re-run this script once a year to renew it.
 #   Settings:   Runs only when you are signed in, does not wake the PC,
 #               stops if it runs longer than 15 minutes.
 #
@@ -40,12 +44,12 @@ if (-not (Test-Path $scriptPath)) {
 
 $taskName = "Onyx Staff Dashboard Auto-Update"
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$scriptPath`" -ComposeFile `"$ComposeFile`""
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration ([TimeSpan]::MaxValue)
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 365)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
-Write-Host "Registered '$taskName' every $IntervalMinutes minutes."
+Write-Host "Registered '$taskName' every $IntervalMinutes minutes, for 365 days (re-run this script yearly to renew)."
 Write-Host "Script: $scriptPath"
 Write-Host "Compose file: $ComposeFile"
 Write-Host "Log: $(Join-Path $projectRoot 'work\auto-update.log')"
