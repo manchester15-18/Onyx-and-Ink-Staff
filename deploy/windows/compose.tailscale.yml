@@ -1,0 +1,71 @@
+# Tailscale-only variant of deploy/windows/compose.yml.
+# Use this INSTEAD of compose.yml when you want the dashboard reachable
+# only via your tailnet, not via localhost / LAN on the host PC.
+#
+# Run from the project root (where .env lives), e.g.:
+#   docker compose -f deploy/windows/compose.tailscale.yml up -d --build
+#
+# Differences from compose.yml, and why they matter:
+# - The dashboard shares the tailscale container's network namespace
+#   (network_mode: "service:tailscale"), so its 8765 port is NOT published
+#   on the host. Reach it at http://<tailscale-device-IP>:8765 from another
+#   device on the same tailnet. The host's localhost:8765 check in
+#   deploy/windows/start.ps1 will NOT pass in this mode — do not use
+#   start.ps1 with this file without updating that check.
+# - ports: is therefore omitted: Compose ignores ports when network_mode
+#   is set, and keeping it would be misleading.
+# - TS_HOSTNAME is set in addition to hostname:, because the Tailscale
+#   container registers its tailnet device name from TS_HOSTNAME, not
+#   from the Docker hostname field alone.
+# - The auth key is NEVER written in this file. The tailscale service
+#   reads it from the host PC's .env via env_file below. Add the key to
+#   that .env on the host PC only — do not commit .env, and do not paste
+#   the key into chat, a compose file, or this repo.
+services:
+  tailscale:
+    image: tailscale/tailscale:latest
+    container_name: tailscale-dashboard
+    hostname: agent-dashboard-pc
+    env_file:
+      - ../../.env
+    environment:
+      - TS_HOSTNAME=agent-dashboard-pc
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_USERSPACE=false
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: ../..
+    image: onyx-and-ink-staff:latest
+    network_mode: "service:tailscale"
+    restart: unless-stopped
+    depends_on:
+      - tailscale
+    env_file:
+      - ../../.env
+    environment:
+      ONYX_CLOUD_MODE: "false"
+      ONYX_WINDOWS_DOCKER: "true"
+      ONYX_BIND_HOST: "0.0.0.0"
+      PORT: "8765"
+    volumes:
+      - ../../.env:/app/.env
+      - ../../google-oauth-client.json:/app/google-oauth-client.json:ro
+      - ../../work:/app/work
+      - ../../reports:/app/reports
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz',timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+
+volumes:
+  tailscale-state:
