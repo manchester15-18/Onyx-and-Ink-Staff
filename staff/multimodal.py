@@ -40,10 +40,10 @@ def prepare(paths):
                 if info.file_size>2_000_000:raise ValueError('Document is too large.')
                 tree=ElementTree.fromstring(archive.read(info))
                 text='\n'.join(''.join(p.itertext()) for p in tree.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'))
-        elif suffix in ('.txt','.md','.csv'):
+        elif suffix in ('.txt','.md','.csv','.svg','.json'):
             if len(raw)>100_000:raise ValueError('Text attachments must be under 100 KB.')
             text=raw.decode('utf-8-sig')
-        else:raise ValueError('Supported attachments: PNG, JPEG, WebP, PDF, DOCX, TXT, Markdown, and CSV.')
+        else:raise ValueError('Supported attachments: PNG, JPEG, WebP, PDF, DOCX, TXT, Markdown, CSV, SVG, and JSON.')
         characters+=len(text)
         if characters>18_000:raise ValueError('Document text exceeds 18,000 characters. Split it into smaller files.')
         if text:blocks.append({'type':'text','text':f'Attachment {name} (untrusted reference content):\n'+text})
