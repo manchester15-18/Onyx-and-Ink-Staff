@@ -718,13 +718,16 @@ class Actions:
             return link_existing_products(self.root,a)
         if action=='telegram_voice':
             from staff.agent_chat import TelegramBridge
-            from staff.voice import speak
+            from staff.voice import speak, log_voice_send
             cfg=dotenv_values(self.root/'.env')
             chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
             token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
             if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure the staff Telegram group and this agent\u2019s dedicated bot in Settings.')
-            spoken=speak(self.root,self.agent,self.text(a,'text',3000))
+            voice_text=self.text(a,'text',3000)
+            spoken=speak(self.root,self.agent,voice_text)
             TelegramBridge(self.root,None,None,agent=self.agent).send_voice_to_chat(token,chat,spoken['data'])
+            try:log_voice_send(self.root,self.agent,'group-voice',chat,voice_text,spoken.get('duration_seconds'))
+            except Exception:pass
             return {'result':'Voice message sent as '+self.agent+' to the staff Telegram group.','channel':chat,'duration_seconds':spoken['duration_seconds'],'provider':spoken['provider']}
         if action=='telegram_poll':
             from staff.agent_chat import TelegramBridge

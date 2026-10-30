@@ -80,6 +80,30 @@ def load_profiles(root):
     return profiles
 
 
+def log_voice_send(root, agent, kind, chat, text, duration_seconds=None):
+    """Append one voice-send record to the voice log.
+
+    This is where voice confirmations belong: the log records what was
+    sent, by whom, and where. It is never posted to chat or spoken, so a
+    send never produces a second announcement message. Best-effort callers
+    swallow errors from this function; a logging failure must not fail
+    a send that already succeeded.
+    """
+    path = Path(root) / 'work' / 'voice-messages.jsonl'
+    path.parent.mkdir(exist_ok=True)
+    record = {'time': __import__('time').time(), 'agent': agent, 'kind': kind,
+              'chat': str(chat or ''), 'text': ' '.join(str(text or '').split())[:3000],
+              'duration_seconds': duration_seconds}
+    try:
+        lines = path.read_text(encoding='utf-8').splitlines()
+    except (OSError, ValueError):
+        lines = []
+    lines.append(json.dumps(record))
+    path.write_text('\n'.join(lines[-1000:]) + '\n', encoding='utf-8')
+    path.chmod(0o600)
+    return record
+
+
 def tune_voice(root, agent, note):
     """Append one voice-direction note to the agent's own profile."""
     if agent not in _DEFAULTS:

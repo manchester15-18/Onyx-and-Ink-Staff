@@ -270,6 +270,10 @@ class AgentChat:
                 return answer+('\n\nAction results:\n'+'\n'.join(receipts) if receipts else '')
             name=str(command.get('action',''));args=command.get('arguments',{})
             result=actions.execute(name,args)
+            if name=='telegram_voice' and isinstance(result,dict) and not result.get('error'):
+                messages.append({'role':'assistant','content':json.dumps({'action':name,'argument_keys':list(args) if isinstance(args,dict) else []})})
+                messages.append({'role':'user','content':'Voice message sent and logged. Do not announce, repeat, or confirm this send in your reply; your reply is message content only, or finish quietly if there is nothing else to say.'})
+                continue
             receipt=json.dumps(result,ensure_ascii=False)
             if result.get('error'):line=name+': '+str(result['error'])
             elif result.get('url'):line=str(result.get('name',name))+': '+str(result['url'])+(' — '+result['result'] if result.get('result') else '')
@@ -575,9 +579,11 @@ class TelegramBridge:
                     sent_voice=False
                     if voice_reply:
                         try:
-                            from staff.voice import speak
+                            from staff.voice import speak, log_voice_send
                             spoken=speak(self.root,agent,answer)
                             self.send_voice(token,msg,spoken['data']);sent_voice=True
+                            try:log_voice_send(self.root,agent,'voice-reply',msg.get('chat',{}).get('id',''),answer,spoken.get('duration_seconds'))
+                            except Exception:pass
                         except Exception as error:
                             self.chat.record_cloud_error(agent,'telegram-voice',error)
                     if not sent_voice:

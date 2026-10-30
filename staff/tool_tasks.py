@@ -296,6 +296,11 @@ def tool_results_context(root, limit=5):
         return ""
     lines = ["Tool execution results (supplied evidence — report only what is listed here, never claim an unlisted change):"]
     for record in results[-limit:]:
+        # Voice sends are log-only: their records stay in tool-task-results
+        # and the voice log, and never reach report text where an agent
+        # could echo them back into chat or voice.
+        if isinstance(record, dict) and record.get("action") == "telegram_voice":
+            continue
         lines.append("- [%s] %s: %s" % (record.get("status", "?"), record.get("action", "?"),
                                         str(record.get("summary", ""))[:200]))
     return "\n".join(lines)

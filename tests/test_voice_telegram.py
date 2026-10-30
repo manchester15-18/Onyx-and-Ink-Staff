@@ -6,9 +6,10 @@ import wave
 from pathlib import Path
 from unittest.mock import patch
 
-from staff.voice import chunk_text, load_profiles, tune_voice
-from staff.agent_chat import TelegramBridge, VOICES
+from staff.voice import chunk_text, load_profiles, tune_voice, log_voice_send
+from staff.agent_chat import TelegramBridge, VOICES, AgentChat
 from staff.media_tools import convert_audio
+from staff.tool_tasks import tool_results_context
 
 
 def _tiny_wav():
@@ -112,6 +113,91 @@ class TelegramDeliveryTests(unittest.TestCase):
             record = json.loads(line)
             self.assertEqual(record['options'], ['Yes'])
             self.assertEqual(record['question'], 'Ship it?')
+
+
+class VoiceLogTests(unittest.TestCase):
+    def test_log_appends_send_records(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            log_voice_send(root, 'Jordan', 'group-voice', '-1001', 'Hello group', 3.5)
+            log_voice_send(root, 'Morgan', 'voice-reply', '42', 'Hello back', 2.0)
+            lines = (root / 'work' / 'voice-messages.jsonl').read_text().strip().splitlines()
+            self.assertEqual(len(lines), 2)
+            first = json.loads(lines[0])
+            self.assertEqual(first['agent'], 'Jordan')
+            self.assertEqual(first['kind'], 'group-voice')
+            self.assertEqual(first['text'], 'Hello group')
+            self.assertEqual(first['duration_seconds'], 3.5)
+
+    def test_log_trims_to_last_thousand(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'work').mkdir()
+            (root / 'work' / 'voice-messages.jsonl').write_text(
+                '\n'.join('{"n": %d}' % i for i in range(1000)) + '\n')
+            log_voice_send(root, 'Avery', 'group-voice', '-1001', 'newest', 1.0)
+            lines = (root / 'work' / 'voice-messages.jsonl').read_text().strip().splitlines()
+            self.assertEqual(len(lines), 1000)
+            self.assertEqual(json.loads(lines[-1])['text'], 'newest')
+
+
+class ActVoiceSuppressionTests(unittest.TestCase):
+    def test_voice_send_is_not_narrated_back(self):
+        import tempfile
+
+        class FakeLLM:
+            def __init__(self):
+                self.calls = []
+
+            def call(self, messages):
+                self.calls.append([dict(m) for m in messages])
+                if len(self.calls) == 1:
+                    return '{"action": "telegram_voice", "arguments": {"text": "hello group"}}'
+                return '{"answer": "Hello content"}'
+
+        class FakeActions:
+            def __init__(self, root, agent, request_id, delete_ids=None):
+                pass
+
+            def execute(self, name, args):
+                self.last = (name, args)
+                if name == 'telegram_voice':
+                    return {'result': 'Voice message sent as Jordan to the staff Telegram group.'}
+                return {'error': 'unknown action'}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            chat = AgentChat(Path(tmp))
+            fake = FakeLLM()
+            messages = [{'role': 'system', 'content': 'sys'},
+                        {'role': 'user', 'content': 'send a voice message to the group saying hello'}]
+            with patch('staff.agent_actions.Actions', FakeActions):
+                answer = chat.act('Jordan', messages, 'test-1', llm=fake, source='dashboard')
+        self.assertEqual(answer, 'Hello content')
+        self.assertNotIn('telegram_voice', answer)
+        self.assertNotIn('Voice message sent', answer)
+        self.assertNotIn('Action results', answer)
+        second_call_text = ' '.join(str(m.get('content', '')) for m in fake.calls[1])
+        self.assertIn('Do not announce', second_call_text)
+
+
+class ContextExclusionTests(unittest.TestCase):
+    def test_voice_results_stay_out_of_report_context(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'work').mkdir()
+            (root / 'work' / 'tool-task-results.json').write_text(json.dumps({'results': [
+                {'action': 'telegram_voice', 'status': 'complete',
+                 'summary': 'Voice message sent as Jordan to the staff Telegram group.'},
+                {'action': 'product_create', 'status': 'complete', 'summary': 'Widget staged'},
+            ]}))
+            context = tool_results_context(root)
+        self.assertIn('product_create', context)
+        self.assertIn('Widget staged', context)
+        self.assertNotIn('telegram_voice', context)
+        self.assertNotIn('Voice message sent', context)
 
 
 if __name__ == '__main__':
