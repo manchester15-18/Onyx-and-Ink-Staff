@@ -25,7 +25,7 @@ class GroqTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             started=[];release=threading.Event()
             class Assignment:
-                def __init__(self,name):self.name=name;self.output_file=Path(directory)/(name+'.md')
+                def __init__(self,name):self.name=name;self.output_file=Path(directory)/(name+'.md');self.assigned_task=None
                 def execute_sync(self):
                     started.append(self.name)
                     if self.name=='Morgan':release.set();raise RuntimeError('quota')

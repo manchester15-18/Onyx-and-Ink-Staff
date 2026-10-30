@@ -100,8 +100,8 @@ def generate_audio(root, text):
 
 
 def convert_audio(wav_data, target_format):
-    """Convert verified WAV bytes to mp3/aac/flac via ffmpeg (installed in
-    the dashboard container; also added to the Dockerfile for rebuilds).
+    """Convert verified WAV bytes to mp3/aac/flac/ogg via ffmpeg (installed
+    in the dashboard container; also added to the Dockerfile for rebuilds).
     Returns bytes in the target format. Never returns a mislabelled file."""
     import shutil
     import subprocess
@@ -110,9 +110,9 @@ def convert_audio(wav_data, target_format):
     fmt = str(target_format).strip().lower().lstrip('.')
     if fmt == 'acc':
         fmt = 'aac'
-    codecs = {'mp3': 'libmp3lame', 'aac': 'aac', 'flac': 'flac'}
+    codecs = {'mp3': 'libmp3lame', 'aac': 'aac', 'flac': 'flac', 'ogg': 'libopus'}
     if fmt not in codecs:
-        raise ValueError('Audio format must be wav, mp3, aac, or flac.')
+        raise ValueError('Audio format must be wav, mp3, aac, flac, or ogg.')
     ffmpeg = shutil.which('ffmpeg')
     if not ffmpeg:
         raise RuntimeError('Audio conversion needs ffmpeg, which is not installed in the dashboard container.')

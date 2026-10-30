@@ -28,7 +28,7 @@ class ReportRecordTests(unittest.TestCase):
         self.assertFalse(is_reference_report("Holiday Instagram Captions", "Five product captions"))
 
     def test_google_export_updates_existing_document(self):
-        with tempfile.TemporaryDirectory() as d, patch("workspace_tools.Workspace.create_doc") as create, patch("workspace_tools.Workspace.replace_doc") as replace:
+        with tempfile.TemporaryDirectory() as d, patch("staff.workspace_tools.Workspace.create_doc") as create, patch("staff.workspace_tools.Workspace.replace_doc") as replace:
             path=self.make_report(d,"# Return Policy\n\nReturns guidance.")
             create.return_value={"id":"doc-one","url":"https://docs.google.com/document/d/doc-one/edit"}
             first=export_google_doc(d,str(path.relative_to(Path(d)/"reports")),force=True)

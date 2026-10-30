@@ -14,7 +14,7 @@ from staff.inbox_state import InboxState
 from staff.agent_actions import Actions
 from staff.staff_email import StaffMail,STAFF
 import dashboard
-import staff.github_sync
+from staff import github_sync
 
 class InboxRevampTests(unittest.TestCase):
  def test_cleanup_hide_restore_never_mutates_gmail(self):
@@ -52,14 +52,14 @@ class InboxRevampTests(unittest.TestCase):
  def test_agent_delete_requires_exact_human_authorization_and_matching_inbox(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);(root/'.env').write_text('AVERY_EMAIL=marketing@example.com\n')
-   with patch('dashboard_mail.Mailbox.read',return_value={'to':'marketing@example.com'}),patch('dashboard_mail.Mailbox.trash',return_value={'message':'Moved to Trash'}) as trash:
+   with patch('staff.dashboard_mail.Mailbox.read',return_value={'to':'marketing@example.com'}),patch('staff.dashboard_mail.Mailbox.trash',return_value={'message':'Moved to Trash'}) as trash:
     a=Actions(root,'Avery','no-command');self.assertIn('error',a.execute('delete_email',{'id':'abc123'}));trash.assert_not_called()
     a=Actions(root,'Avery','command',delete_ids=['abc123']);self.assertIn('message',a.execute('delete_email',{'id':'abc123'}));trash.assert_called_once()
  def test_delete_endpoint_requires_confirmation(self):
   body=json.dumps({'id':'abc123','confirm':False}).encode();handler=dashboard.Handler.__new__(dashboard.Handler)
   handler.client_address=('127.0.0.1',123);handler.connection=None;handler.path='/api/delete-email';handler.rfile=io.BytesIO(body);handler.reply=Mock();handler.headers=Message()
   for k,v in {'Host':'127.0.0.1:8765','Origin':'http://127.0.0.1:8765','X-Dashboard-Token':dashboard.TOKEN,'Content-Length':str(len(body))}.items():handler.headers[k]=v
-  with patch.object(dashboard.MAILBOX,'trash') as trash:
+  with patch.object(dashboard.MAILBOX,'trash') as trash,patch.object(dashboard.ACCESS,'require_login',False):
    handler.do_POST();self.assertEqual(handler.reply.call_args.args[0],400);trash.assert_not_called()
  def test_changelog_records_updates_once_without_source_contents(self):
   with tempfile.TemporaryDirectory() as d,patch.object(github_sync,'ROOT',Path(d)):

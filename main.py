@@ -296,6 +296,12 @@ def design_checklist(image_path: str) -> str:
     lines.extend(f"{status}: {name} — {detail}" for status, name, detail in checks)
     return "\n".join(lines)
 
+@tool("Run the Impeccable detector")
+def impeccable_detect_tool(target: str, scope: str = "") -> str:
+    """Run the Impeccable detector (read-only) on one file or directory. Input: target (a file or directory under the project) and optional scope (type, layout, or both, comma-separated). Returns the detector report."""
+    from staff.impeccable_tools import detect_impeccable
+    return detect_impeccable(PROJECT_DIR, target, scope or None)
+
 @tool("Critique a design")
 def critique_design_tool(image_path: str, product: str, verdict: str, what_was_right: str, what_was_wrong: str, suggested_fix: str, agent: str = "Avery") -> str:
     """Critique a generated design and turn the critique into a lesson for the next generation. Avery must look at the image first and report honestly what is right and what is wrong.
@@ -550,6 +556,8 @@ def run_assignments(tasks):
     Deliberately kept sequential: Morgan QC and the consolidated-report /
     Drive export in main(), which genuinely depend on all four reports.
     """
+    def claimed_id(task):
+        return (getattr(task, 'assigned_task', None) or {}).get('id')
     direct=all(isinstance(task,DirectAutonomousAssignment) for task in tasks.values())
     workers=4 if direct else 1
     outputs={};errors=[];pending=iter(tasks.items());active={}
@@ -564,13 +572,13 @@ def run_assignments(tasks):
                 name=active.pop(future)
                 try:output=future.result()
                 except Exception as error:
-                    release_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'))
+                    release_staff_task(PROJECT_DIR,claimed_id(tasks[name]))
                     errors.append(error);halted=True;continue
                 finalized=finalize_assignment_report(tasks[name].output_file,name,output)
                 if finalized:
-                    complete_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'),output)
+                    complete_staff_task(PROJECT_DIR,claimed_id(tasks[name]),output)
                 else:
-                    release_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'))
+                    release_staff_task(PROJECT_DIR,claimed_id(tasks[name]))
                 outputs[name]=output
             if halted:
                 for future in active:future.cancel()
@@ -579,12 +587,12 @@ def run_assignments(tasks):
                     if future.cancelled():continue
                     try:output=future.result()
                     except Exception as error:
-                        release_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'))
+                        release_staff_task(PROJECT_DIR,claimed_id(tasks[name]))
                         errors.append(error)
                     else:
                         finalized=finalize_assignment_report(tasks[name].output_file,name,output)
-                        if finalized:complete_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'),output)
-                        else:release_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'))
+                        if finalized:complete_staff_task(PROJECT_DIR,claimed_id(tasks[name]),output)
+                        else:release_staff_task(PROJECT_DIR,claimed_id(tasks[name]))
                         outputs[name]=output
                 active.clear();break
             while len(active)<workers:

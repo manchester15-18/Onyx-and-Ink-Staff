@@ -50,6 +50,9 @@ TOOL_ALLOWLIST = {
     "square_inventory_set",
     "product_create",
     "square_link_catalog",
+    "telegram_voice",
+    "telegram_poll",
+    "voice_tune",
 }
 
 # Actions that must never run without CEO approval.
@@ -150,14 +153,17 @@ def _needs_approval(action, args):
     return False
 
 
-def _execute(root, action, args, run_id, executor):
+_IDENTITY_ACTIONS = {"telegram_voice", "telegram_poll", "voice_tune"}
+
+
+def _execute(root, action, args, run_id, executor, agent="Jordan"):
     if executor is not None:
         return executor(action, args, run_id)
     from staff.agent_actions import Actions
-    return Actions(root, "Jordan", run_id).execute(action, args)
+    return Actions(root, agent, run_id).execute(action, args)
 
 
-def _run(root, results, action, args, ceo_approved, run_id, source, task_id, executor):
+def _run(root, results, action, args, ceo_approved, run_id, source, task_id, executor, agent="Jordan"):
     """Execute one tool request and record the outcome. Never raises."""
     if action not in TOOL_ALLOWLIST:
         record = {"source": source, "task_id": task_id, "action": action,
@@ -174,7 +180,7 @@ def _run(root, results, action, args, ceo_approved, run_id, source, task_id, exe
         args = dict(args or {})
         args["ceo_approved"] = bool(ceo_approved)
     try:
-        result = _execute(root, action, args, run_id, executor)
+        result = _execute(root, action, args, run_id, executor, agent)
     except Exception as error:  # defensive: dispatch normally returns errors
         result = {"error": "%s: %s" % (type(error).__name__, str(error)[:200])}
     status = "failed" if isinstance(result, dict) and "error" in result else "complete"
@@ -220,9 +226,12 @@ def drain_tool_tasks(root, project_id, project_folder=None, executor=None, limit
                       "summary": "Tool task has no action."}
             created.append(_record(root, results, record))
         else:
+            sender = str(task.get("from", "") or "")
+            voice_agent = sender if action in _IDENTITY_ACTIONS and sender in (
+                "Morgan", "Avery", "Jordan", "Cameron") else "Jordan"
             created.append(_run(root, results, action, args, approved,
                                 "tool-task-" + str(task.get("id", "")), "queue",
-                                task.get("id"), executor))
+                                task.get("id"), executor, voice_agent))
         try:
             task_complete(root, task.get("id"), created[-1]["summary"])
         except (OSError, ValueError, TypeError):

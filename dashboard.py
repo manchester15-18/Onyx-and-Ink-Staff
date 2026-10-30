@@ -12,7 +12,7 @@ import sys
 import threading
 import signal
 import time
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 import fcntl
 from datetime import datetime, timezone
 from email import policy
@@ -25,7 +25,7 @@ from staff.report_format import normalize_report
 from staff.delivery_tracking import check_delivery
 from staff.inbox_state import InboxState
 from staff.staff_autonomy import StaffAutonomy
-from staff.report_projects import create_report, delete_project, delete_report, ensure_project, projects, consolidate_assignment_reports, project_overview, save_project_overview
+from staff.report_projects import active_project, create_report, delete_project, delete_report, ensure_project, projects, consolidate_assignment_reports, project_overview, save_project_overview
 from staff.staff_tasks import status as staff_task_status
 from staff.report_records import export_google_doc, metadata_many as report_metadata_many, report_pdf
 
@@ -109,7 +109,18 @@ def desired():
 
 def set_desired(value):
     DESIRED.parent.mkdir(exist_ok=True)
-    temporary=DESIRED.with_suffix('.tmp');temporary.write_text(json.dumps({'enabled':value}));temporary.replace(DESIRED)
+    atomic_write_json(DESIRED,{'enabled':value})
+
+
+def atomic_write_json(path,data,secure=False):
+    # Write JSON atomically: temp file, optional 0600, then replace.
+    temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(data))
+    if secure:temporary.chmod(0o600)
+    temporary.replace(path)
+
+
+def content_disposition(filename):
+    return "attachment; filename*=UTF-8''"+quote(filename,safe='')
 
 
 def start_monitor():
@@ -169,7 +180,7 @@ def post_daily_brief(force=False):
     text='\n'.join(lines)[:3900]
     if target and token: TELEGRAM_AGENTS['Morgan'].api(token,'sendMessage',{'chat_id':target,'text':text})
     if discord_ready: DISCORD.daily_brief(text)
-    temp=path.with_suffix('.tmp');temp.write_text(json.dumps({'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target}));temp.chmod(0o600);temp.replace(path)
+    atomic_write_json(path,{'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target},secure=True)
     return True
 
 
@@ -194,7 +205,7 @@ def post_daily_staff_handoffs(force=False):
         message='[[ONYX_STAFF target='+agent+' hops=1]] Daily check-in for '+name+'. Review your current assignment: '+context+' State your next concrete action and any blocker for Morgan.'
         bridge.api(token,'sendMessage',{'chat_id':target,'text':message})
         sent.append(agent)
-    temp=path.with_suffix('.tmp');temp.write_text(json.dumps({'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target,'agents':sent}));temp.chmod(0o600);temp.replace(path)
+    atomic_write_json(path,{'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target,'agents':sent},secure=True)
     return True
 
 
@@ -212,7 +223,6 @@ def clean(text, config=None):
     for key,value in (config or dotenv_values(ROOT/'.env')).items():
         if value and any(word in key.upper() for word in ('KEY','PASSWORD','SECRET','TOKEN')):
             text=text.replace(value,'[REDACTED]')
-    import re
     return re.sub(r'(?:gsk_|AIza)[A-Za-z0-9_-]+','[REDACTED]',text)
 
 
@@ -367,8 +377,8 @@ class Handler(BaseHTTPRequestHandler):
             state=query.get('state',[''])[0]
             code=query.get('code',[''])[0]
             if not state or not code:return self.reply(400,b'<h2>Google sign-in could not be completed.</h2>','text/html; charset=utf-8')
-            target=ROOT/'work'/'workspace-auth-response.json';temporary=target.with_suffix('.tmp')
-            temporary.write_text(json.dumps({'state':state,'query':urlparse(self.path).query}));temporary.chmod(0o600);temporary.replace(target)
+            target=ROOT/'work'/'workspace-auth-response.json'
+            atomic_write_json(target,{'state':state,'query':urlparse(self.path).query},secure=True)
             return self.reply(200,b'<h2>Google Workspace connected.</h2><p>You may close this tab and return to Onyx &amp; Ink.</p>','text/html; charset=utf-8')
         if not self.allowed():return self.reply(403,{'error':'Local access only.'})
         if path=='/healthz':return self.reply(200,{'status':'ok'})
@@ -383,14 +393,12 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/attachment':
             try:
                 args=parse_qs(urlparse(self.path).query);name,content=MAILBOX.attachment(args.get('id',[''])[0],args.get('part',[''])[0])
-                from urllib.parse import quote
-                return self.reply(200,content,'application/octet-stream',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(name,safe='')})
+                return self.reply(200,content,'application/octet-stream',{'Content-Disposition':content_disposition(name)})
             except (ValueError,RuntimeError):return self.reply(400,{'error':'Attachment unavailable.'})
         if path=='/api/artifact':
             try:
                 tools=Actions(ROOT,'Morgan','download')
                 identifier=parse_qs(urlparse(self.path).query).get('id',[''])[0]
-                from urllib.parse import quote as _quote
                 try:
                     row=next((f for f in tools.files() if f['file_id']==identifier),None)
                 except Exception:
@@ -400,15 +408,14 @@ class Handler(BaseHTTPRequestHandler):
                 file=tools.file(identifier)
                 filename=(row['filename'] if row and row.get('filename') else file.name)
                 kind={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.svg':'image/svg+xml','.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.md':'text/markdown; charset=utf-8','.txt':'text/plain; charset=utf-8','.wav':'audio/wav','.mp3':'audio/mpeg','.aac':'audio/aac','.flac':'audio/flac','.ogg':'audio/ogg','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.mkv':'video/x-matroska'}.get(file.suffix.lower(),'application/octet-stream')
-                return self.reply(200,file.read_bytes(),kind,{'Content-Disposition':"attachment; filename*=UTF-8''"+_quote(filename,safe='')})
+                return self.reply(200,file.read_bytes(),kind,{'Content-Disposition':content_disposition(filename)})
             except (ValueError,OSError):return self.reply(404,{'error':'Generated file not found.'})
         if path=='/api/report-pdf':
             try:
-                from urllib.parse import quote
                 identifier=parse_qs(urlparse(self.path).query).get('id',[''])[0]
                 title,content=report_pdf(ROOT,identifier)
                 filename=re.sub(r'[^A-Za-z0-9._-]+','-',title).strip('-')[:100] or 'report'
-                return self.reply(200,content,'application/pdf',{'Content-Disposition':"attachment; filename*=UTF-8''"+quote(filename+'.pdf',safe='')})
+                return self.reply(200,content,'application/pdf',{'Content-Disposition':content_disposition(filename+'.pdf')})
             except (ValueError,OSError):return self.reply(404,{'error':'Report not found.'})
         names={'/':'index.html','/overview':'index.html','/inbox':'index.html','/activity':'index.html','/reports':'index.html','/settings':'index.html','/chat':'index.html','/files':'index.html','/live':'index.html','/app.js':'app.js','/style.css':'style.css','/preview-modern.html':'preview-modern.html'}
         if path not in names:return self.reply(404,{'error':'Not found.'})
@@ -449,13 +456,12 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:current={}
                 if current.get('status')=='running':
                     try:
-                        from datetime import datetime as _dt, timezone as _tz
-                        started=_dt.fromisoformat(str(current.get('startedAt','')).replace('Z','+00:00'))
-                        stale=(_dt.now(_tz.utc)-started).total_seconds()>900
+                        started=datetime.fromisoformat(str(current.get('startedAt','')).replace('Z','+00:00'))
+                        stale=(datetime.now(timezone.utc)-started).total_seconds()>900
                     except Exception:stale=False
                     if not stale:return self.reply(409,{'error':'A command is already running. Wait for it to finish.'})
                 if (base/'request.json').exists():return self.reply(409,{'error':'A command is already queued.'})
-                tmp=base/'request.json.tmp';tmp.write_text(json.dumps({'command':command,'status':'pending'}));tmp.replace(base/'request.json')
+                atomic_write_json(base/'request.json',{'command':command,'status':'pending'})
                 return self.reply(200,{'queued':True,'command':command})
             if self.path=='/api/chat-history':return self.reply(200,{'messages':CHAT.history(data.get('agent','Morgan'))})
             if self.path=='/api/chat':
@@ -546,7 +552,7 @@ class Handler(BaseHTTPRequestHandler):
                     result=Actions(ROOT,'Jordan','cloudflare-check-'+secrets.token_hex(8)).execute('design',{'prompt':'Minimal black and gold Onyx and Ink connection test icon on a plain white background, no text','model':'schnell'})
                     if result.get('error'):raise RuntimeError(result['error'])
                     status={'state':'connected','checked':datetime.now(timezone.utc).isoformat(),'message':'Live image generation verified.'}
-                    path=ROOT/'work'/'cloudflare-status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(status));temp.chmod(0o600);temp.replace(path)
+                    path=ROOT/'work'/'cloudflare-status.json';atomic_write_json(path,status,secure=True)
                     return self.reply(200,{'message':'Cloudflare image generation verified. The test image is in Created files.','file':result.get('file_id')})
                 elif self.path in ('/api/square','/api/square-check'):
                     token=str(data.get('token','')).strip();environment=str(data.get('environment','sandbox')).strip().lower()
@@ -571,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:verify(key)
                     except WebResearchError as error:return self.reply(400,{'error':str(error)})
                     status={'state':'connected','checked':datetime.now(timezone.utc).isoformat(),'message':'Live Tavily web search verified.'}
-                    path=ROOT/'work'/'tavily-status.json';temp=path.with_suffix('.tmp');temp.write_text(json.dumps(status));temp.chmod(0o600);temp.replace(path)
+                    path=ROOT/'work'/'tavily-status.json';atomic_write_json(path,status,secure=True)
                     return self.reply(200,{'message':'Tavily web search verified.'})
                 elif self.path=='/api/signatures':
                     config=dotenv_values(ROOT/'.env');addresses={n:config.get(k,'') for n,_,k in STAFF};website=config.get('BUSINESS_WEBSITE','https://onyxandink.org')

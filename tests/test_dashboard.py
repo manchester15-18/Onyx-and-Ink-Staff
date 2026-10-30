@@ -9,6 +9,8 @@ from email.message import EmailMessage
 import dashboard
 
 class DashboardTests(unittest.TestCase):
+    def setUp(self):
+        patcher=patch.object(dashboard.ACCESS,'require_login',False);patcher.start();self.addCleanup(patcher.stop)
     def test_autonomy_activation_email_is_sent_once(self):
         state={'enabled':True,'start':'07:30','stop':'23:30','objective':'Continue approved work and record results.'}
         autonomy=Mock();autonomy.load.side_effect=[{'enabled':False},{'enabled':True}];autonomy.configure.return_value=state

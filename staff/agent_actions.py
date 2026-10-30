@@ -46,7 +46,7 @@ def artifact_mime(suffix):
 CATALOG = '''Actions (use exact names and argument keys):
 report {project:project name optional,title,text}; document {title,text}; word_document {title,text}; pdf {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]}; print_sheet {title,file_ids:[generated PNG/JPEG IDs]}; drive_search {query}; drive_download {id,name};
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
-design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; workspace_files {};
+design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; telegram_voice {text} (send a voice message in your own voice to the staff Telegram group); telegram_poll {question,options:[2-10 strings],anonymous:true,allows_multiple_answers:false} (post a Telegram poll to the staff group; votes are recorded for any agent to read); voice_tune {note} (refine your own voice direction; never tune another agent); workspace_files {};
 products {query:optional}; product_update {id:optional existing/new product ID,title,description,price,image_file_id:optional uploaded/generated image,status:draft,ready,or published}; square_import_website {url:optional public store URL};
 github_site_files {query:optional}; github_site_read {path}; github_preview_patch {path,find,replace,summary}; github_preview_write {path,content,summary};
 github_main_files {query:optional}; github_main_read {path}; github_main_patch_request {path,find,replace,summary};
@@ -716,5 +716,30 @@ class Actions:
             if self.agent!='Jordan':raise ValueError('Only Jordan manages Square catalog linking.')
             from staff.square_link import link_existing_products
             return link_existing_products(self.root,a)
+        if action=='telegram_voice':
+            from staff.agent_chat import TelegramBridge
+            from staff.voice import speak
+            cfg=dotenv_values(self.root/'.env')
+            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
+            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
+            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure the staff Telegram group and this agent\u2019s dedicated bot in Settings.')
+            spoken=speak(self.root,self.agent,self.text(a,'text',3000))
+            TelegramBridge(self.root,None,None,agent=self.agent).send_voice_to_chat(token,chat,spoken['data'])
+            return {'result':'Voice message sent as '+self.agent+' to the staff Telegram group.','channel':chat,'duration_seconds':spoken['duration_seconds'],'provider':spoken['provider']}
+        if action=='telegram_poll':
+            from staff.agent_chat import TelegramBridge
+            cfg=dotenv_values(self.root/'.env')
+            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
+            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
+            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure the staff Telegram group and this agent\u2019s dedicated bot in Settings.')
+            options=a.get('options',[])
+            if not isinstance(options,list):raise ValueError('Poll options must be a list of 2-10 strings.')
+            sent=TelegramBridge(self.root,None,None,agent=self.agent).send_poll(token,chat,self.text(a,'question',300),options,a.get('anonymous',True) is not False,a.get('allows_multiple_answers',False) is True)
+            poll=(sent.get('poll',{}) if isinstance(sent,dict) else {})
+            return {'result':'Poll sent as '+self.agent+' to the staff Telegram group.','poll_id':str(poll.get('id','')),'question':self.text(a,'question',300)}
+        if action=='voice_tune':
+            from staff.voice import tune_voice
+            tuned=tune_voice(self.root,self.agent,self.text(a,'note',200))
+            return {'result':'Voice direction updated for '+self.agent+'.','notes':tuned['notes']}
         raise ValueError('Unknown action "'+action+'". Choose an action from the available staff tools.')
 

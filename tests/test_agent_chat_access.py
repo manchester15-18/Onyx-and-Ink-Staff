@@ -238,7 +238,7 @@ class ChatAccessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
             chat=AgentChat(root);chat.llm=Mock()
-            with patch('agent_actions.Actions.execute',return_value={'result':'Email accepted by mail server; inbox delivery is not verified.'}) as execute:
+            with patch('staff.agent_actions.Actions.execute',return_value={'result':'Email accepted by mail server; inbox delivery is not verified.'}) as execute:
                 answer=chat.ask('Morgan','Tell Cameron to get the return policy information ASAP.','14141414-1414-1414-1414-141414141414')
             self.assertIn('sent your message to Cameron',answer)
             self.assertEqual(execute.call_args.args[0],'staff_message')
