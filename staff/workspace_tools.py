@@ -1,5 +1,6 @@
 """Google Workspace access limited to app-created files and owned calendar events."""
 import argparse
+import re
 import json
 import os
 import textwrap
@@ -31,6 +32,10 @@ def save_status(root,state,account='',message=''):
     path=Path(root)/'work'/'workspace-status.json';path.parent.mkdir(exist_ok=True)
     data={'state':state,'account':account,'message':message,'checked':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()}
     temp=path.with_suffix('.'+uuid.uuid4().hex+'.tmp');temp.write_text(json.dumps(data));temp.chmod(0o600);temp.replace(path)
+
+def _disp(title, ext):
+    stem = re.sub(r'[^A-Za-z0-9._-]+', '-', str(title or '').strip()).strip('-.')[:100] or 'artifact'
+    return stem + ext
 
 class Workspace:
     def __init__(self,root):self.root=Path(root);self.path=self.root/'work'/'google-workspace-token.json'
@@ -94,7 +99,7 @@ class Workspace:
         self.register(result['id'],'file');return result
     def create_doc(self,title,text):
         doc=self.request('POST','https://docs.googleapis.com/v1/documents',json={'title':title});identifier=doc['documentId'];self.register(identifier,'doc')
-        self.append_doc(identifier,text);return {'id':identifier,'url':'https://docs.google.com/document/d/'+identifier+'/edit'}
+        self.append_doc(identifier,text);url='https://docs.google.com/document/d/'+identifier+'/edit';return {'id':identifier,'title':title,'filename':_disp(title,'.docx'),'format':'DOCX','mime_type':'application/vnd.google-apps.document','export_format':'docx','url':url,'link':url,'note':'Live Google Doc; download/export as .docx from Drive or File > Download.'}
     def append_doc(self,identifier,text):
         identifier=self.own(identifier,'doc')
         return self.request('POST','https://docs.googleapis.com/v1/documents/'+identifier+':batchUpdate',json={'requests':[{'insertText':{'endOfSegmentLocation':{},'text':text+'\n'}}]})
@@ -107,7 +112,7 @@ class Workspace:
         return self.request('POST','https://docs.googleapis.com/v1/documents/'+self.own(identifier,'doc')+':batchUpdate',json={'requests':requests})
     def create_sheet(self,title,values):
         sheet=self.request('POST','https://sheets.googleapis.com/v4/spreadsheets',json={'properties':{'title':title}});identifier=sheet['spreadsheetId'];self.register(identifier,'sheet')
-        self.write_sheet(identifier,'Sheet1!A1',values);return {'id':identifier,'url':sheet['spreadsheetUrl']}
+        self.write_sheet(identifier,'Sheet1!A1',values);url=sheet['spreadsheetUrl'];return {'id':identifier,'title':title,'filename':_disp(title,'.xlsx'),'format':'XLSX','mime_type':'application/vnd.google-apps.spreadsheet','export_format':'xlsx','url':url,'link':url,'note':'Live Google Sheet; download/export as .xlsx from Drive or File > Download.'}
     def write_sheet(self,identifier,cell_range,values):
         identifier=self.own(identifier,'sheet')
         return self.request('PUT','https://sheets.googleapis.com/v4/spreadsheets/'+identifier+'/values/'+quote(cell_range,safe=''),params={'valueInputOption':'RAW'},json={'values':values})
@@ -116,7 +121,7 @@ class Workspace:
         return self.request('GET','https://sheets.googleapis.com/v4/spreadsheets/'+identifier+'/values/'+quote(cell_range,safe=''))
     def create_slides(self,title,slides):
         deck=self.request('POST','https://slides.googleapis.com/v1/presentations',json={'title':title});identifier=deck['presentationId'];self.register(identifier,'slides')
-        self.replace_slides(identifier,slides);return {'id':identifier,'url':'https://docs.google.com/presentation/d/'+identifier+'/edit'}
+        self.replace_slides(identifier,slides);url='https://docs.google.com/presentation/d/'+identifier+'/edit';return {'id':identifier,'title':title,'filename':_disp(title,'.pptx'),'format':'PPTX','mime_type':'application/vnd.google-apps.presentation','export_format':'pptx','url':url,'link':url,'note':'Live Google Slides deck (PowerPoint/Slides/Deck are interchangeable here); download/export as .pptx from Drive or File > Download.'}
     def _slide_operations(self,slides):
         """Build a restrained, editorial 16:9 slide composition for staff decks."""
         operations=[]
@@ -171,6 +176,25 @@ class Workspace:
         return self.request('POST','https://slides.googleapis.com/v1/presentations/'+encoded+':batchUpdate',json={'requests':operations})
     def read_doc(self,identifier):return self.request('GET','https://docs.googleapis.com/v1/documents/'+self.own(identifier,'doc'))
     def read_slides(self,identifier):return self.request('GET','https://slides.googleapis.com/v1/presentations/'+self.own(identifier,'slides'))
+    def create_drawing(self,title):
+        # There is no Google Drawings create API for drawing shapes. Drive
+        # files.create with the Drawings MIME type creates a real but BLANK
+        # drawing; shapes/text must be added in the Google Drawings UI.
+        # Callers must say so and never claim drawn content exists.
+        result=self.request('POST','https://www.googleapis.com/drive/v3/files',params={'fields':'id,webViewLink,mimeType'},json={'name':title,'mimeType':'application/vnd.google-apps.drawing'})
+        identifier=result['id'];self.register(identifier,'drawing')
+        url=result.get('webViewLink');return {'id':identifier,'title':title,'filename':_disp(title,'.png'),'format':'PNG','mime_type':result.get('mimeType'),'export_format':'png','url':url,'link':url,'note':'Blank Google Drawing created via Drive. Add shapes and text in the Google Drawings editor; the API cannot draw content.'}
+    def drawing_info(self,identifier):
+        identifier=self.own(identifier,'drawing')
+        return self.request('GET','https://www.googleapis.com/drive/v3/files/'+identifier,params={'fields':'id,name,mimeType,webViewLink,createdTime,trashed'})
+    def export_drawing(self,identifier,mime='image/png'):
+        # Export a drawing as PNG bytes for verification; raises honestly
+        # if Drive cannot export it.
+        identifier=self.own(identifier,'drawing')
+        response=requests.get('https://www.googleapis.com/drive/v3/files/'+identifier+'/export',headers={'Authorization':'Bearer '+self.token()},params={'mimeType':mime},timeout=60)
+        if not response.ok:raise RuntimeError('Google Drive could not export that drawing.')
+        if len(response.content)>15_000_000:raise RuntimeError('Exported drawing exceeds the 15 MB staff-file limit.')
+        return response.content,response.headers.get('Content-Type','application/octet-stream')
     def calendar(self):return self.request('GET','https://www.googleapis.com/calendar/v3/calendars/primary/events',params={'maxResults':20,'singleEvents':'true','orderBy':'startTime','timeMin':__import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()})
     def create_event(self,summary,start,end):
         # Primary calendar only; do not invite guests or email notifications.

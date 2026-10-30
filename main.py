@@ -532,10 +532,29 @@ def build_assignments(llm, directive, report_dir, search_key=None, verbose=False
 
 
 def run_assignments(tasks):
-    """Run departments one at a time to preserve free-tier cloud capacity."""
+    """Run independent departments in parallel; CrewAI tool tasks stay sequential.
+
+    Latency, Oct 28 2026: the last full cycle took 282s because this ran
+    one agent at a time (Morgan 117s + Avery 92s + Jordan 39s + Cameron
+    25s, including startup/fallback), even though the log and the task
+    text both call the four assignments independent and no deliverable
+    depends on another agent's output. Only the bounded direct path is
+    parallelised: each DirectAutonomousAssignment is one self-contained
+    model call writing its own report file, progress updates are locked,
+    and task claim/complete still happen in this main thread. The shared
+    free-tier budget still gates each call (see model_routing.reserve):
+    four parallel background reservations fit the OpenRouter minute floor
+    (5-1=4), and a budget-exhausted agent falls through to its next
+    provider instead of crashing. The CrewAI tool-capable path keeps
+    max_workers=1 because its tools and shared state are not thread-safe.
+    Deliberately kept sequential: Morgan QC and the consolidated-report /
+    Drive export in main(), which genuinely depend on all four reports.
+    """
+    direct=all(isinstance(task,DirectAutonomousAssignment) for task in tasks.values())
+    workers=4 if direct else 1
     outputs={};errors=[];pending=iter(tasks.items());active={}
-    with ThreadPoolExecutor(max_workers=1,thread_name_prefix='onyx-staff') as pool:
-        for _ in range(1):
+    with ThreadPoolExecutor(max_workers=workers,thread_name_prefix='onyx-staff') as pool:
+        for _ in range(workers):
             try:name,task=next(pending);active[pool.submit(task.execute_sync)]=name
             except StopIteration:break
         halted=False
@@ -568,7 +587,7 @@ def run_assignments(tasks):
                         else:release_staff_task(PROJECT_DIR,(tasks[name].assigned_task or {}).get('id'))
                         outputs[name]=output
                 active.clear();break
-            while len(active)<1:
+            while len(active)<workers:
                 try:name,task=next(pending);active[pool.submit(task.execute_sync)]=name
                 except StopIteration:break
     if errors:

@@ -306,6 +306,25 @@ def main(argv=None):
         chat=AgentChat(PROJECT_DIR)
         def reply(staff,message,body):
             sender=parseaddr(message.get('From',''))[1].lower()
+            # CEO/VP decision intake (Oct 30, 2026): a CEO or VP reply to
+            # a decision-packet thread is executed, not just chatted
+            # about. handle_decision_email returns None for everything
+            # else, so all existing reply paths below run unchanged.
+            # Decision handling must never break mail: any failure falls
+            # through to the normal reply paths.
+            sender_role=None
+            if sender and sender==str(mail.addresses.get('Owner','')).lower():
+                sender_role='CEO'
+            elif sender and sender==str(mail.addresses.get('Jaunee','')).lower():
+                sender_role='VP'
+            if sender_role is not None:
+                try:
+                    from staff.ceo_decisions import handle_decision_email
+                    decided=handle_decision_email(PROJECT_DIR,mail,message,body,sender_role)
+                    if decided is not None:
+                        return decided
+                except Exception:
+                    pass
             if sender==mail.addresses['Owner'].lower():
                 return continue_owner_reply(chat,staff,message,body)
             sender_name=next((name for name in (*STAFF,'Jaunee') if mail.addresses.get(name,'').lower()==sender),None)

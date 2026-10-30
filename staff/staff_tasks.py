@@ -44,7 +44,7 @@ def _wake_staff(root):
         _write(path, state)
 
 
-def enqueue(root, sender, recipient, text, project):
+def enqueue(root, sender, recipient, text, project, tool=None):
     if recipient not in STAFF:
         raise ValueError('Choose a named staff recipient.')
     instruction = ' '.join(str(text or '').split())
@@ -55,6 +55,14 @@ def enqueue(root, sender, recipient, text, project):
     task = {'id': uuid.uuid4().hex, 'project': str(project or ''), 'from': str(sender or 'Staff'),
             'to': recipient, 'text': instruction[:2000], 'status': 'pending',
             'created': now, 'updated': now}
+    if tool is not None:
+        if not isinstance(tool, dict) or not isinstance(tool.get('action'), str) or not tool.get('action').strip():
+            raise ValueError('A tool task needs an action name.')
+        args = tool.get('args', {})
+        if not isinstance(args, dict):
+            raise ValueError('Tool task arguments must be an object.')
+        task['tool'] = {'action': tool['action'].strip(), 'args': args,
+                        'ceo_approved': tool.get('ceo_approved') is True}
     data['tasks'].append(task)
     _save(root, data)
     _wake_staff(root)

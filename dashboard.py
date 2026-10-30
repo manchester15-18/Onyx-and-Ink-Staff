@@ -390,9 +390,17 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 tools=Actions(ROOT,'Morgan','download')
                 identifier=parse_qs(urlparse(self.path).query).get('id',[''])[0]
+                from urllib.parse import quote as _quote
+                try:
+                    row=next((f for f in tools.files() if f['file_id']==identifier),None)
+                except Exception:
+                    row=None
+                if row and row.get('url','').startswith('https://'):
+                    self.send_response(302);self.send_header('Location',row['url']);self.send_header('Cache-Control','no-store');self.end_headers();return
                 file=tools.file(identifier)
-                kind={'.png':'image/png','.md':'text/plain; charset=utf-8'}.get(file.suffix,'application/octet-stream')
-                return self.reply(200,file.read_bytes(),kind)
+                filename=(row['filename'] if row and row.get('filename') else file.name)
+                kind={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.svg':'image/svg+xml','.pdf':'application/pdf','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.md':'text/markdown; charset=utf-8','.txt':'text/plain; charset=utf-8','.wav':'audio/wav','.mp3':'audio/mpeg','.aac':'audio/aac','.flac':'audio/flac','.ogg':'audio/ogg','.mp4':'video/mp4','.webm':'video/webm','.mov':'video/quicktime','.mkv':'video/x-matroska'}.get(file.suffix.lower(),'application/octet-stream')
+                return self.reply(200,file.read_bytes(),kind,{'Content-Disposition':"attachment; filename*=UTF-8''"+_quote(filename,safe='')})
             except (ValueError,OSError):return self.reply(404,{'error':'Generated file not found.'})
         if path=='/api/report-pdf':
             try:

@@ -51,6 +51,14 @@ OPENROUTER_DEFAULT_LIMITS=(128000, 16384)
 # models, 200 worked). Never send an OpenRouter request below this floor.
 OPENROUTER_REASONING_FLOOR=512
 OPENROUTER_HEADROOM=256
+# Latency, Oct 28 2026: one stalled free model used to hold a whole cycle
+# for up to 45s, and the next agent then retried the same slow model. A
+# 30s per-request cap plus a cycle-scoped cooldown on timeout/empty
+# answers bounds a stalled attempt without removing any fallback route:
+# a timeout still falls through to the next provider/model in this call,
+# and the next agent skips the slow model for the rest of the cycle.
+REQUEST_TIMEOUT_SECONDS=30
+SLOW_MODEL_COOLDOWN_SECONDS=300
 
 def openrouter_estimate_prompt_tokens(messages):
     characters=0;images=0
@@ -219,7 +227,18 @@ class RoutedLLM(BaseLLM):
             if provider=='openrouter':
                 if model!='openrouter/free' and not model.endswith(':free'):raise RoutingError('Final fallback requires a free cloud model')
                 body['provider']={'max_price':{'prompt':0,'completion':0,'request':0},'allow_fallbacks':True}
-        response=requests.post(url,headers=headers,json=body,timeout=45)
+        try:
+            response=requests.post(url,headers=headers,json=body,timeout=REQUEST_TIMEOUT_SECONDS)
+        except requests.RequestException:
+            # Fail fast, and do not let every subsequent agent in this
+            # cycle re-stall on the same slow model. A timeout is
+            # transient, so this is a short cycle-scoped cooldown, not
+            # the 24h terminal-error cooldown below. The caller still
+            # falls through to the next provider/model in this call.
+            # Never include the exception text: it may carry a key or URL.
+            if provider in ('openrouter','gemini') and not self.is_model_cooling_down(model):
+                self.set_model_cooldown(model,SLOW_MODEL_COOLDOWN_SECONDS)
+            raise
         if not response.ok:
             if provider=='gemini':
                 if response.status_code==429:self.set_model_cooldown(model,gemma_cooldown_seconds(self.cfg) if model.startswith('gemma-') else 60)
@@ -246,7 +265,16 @@ class RoutedLLM(BaseLLM):
             answer=re.sub(r'<think>.*?</think>', '', answer, flags=re.DOTALL).strip()
             answer=re.sub(r'<thought>.*?</thought>', '', answer, flags=re.DOTALL).strip()
             if '<think>' in answer or '<thought>' in answer:answer=''
-        if not isinstance(answer,str) or not answer.strip():raise RoutingError(provider+' returned no visible answer')
+        if not isinstance(answer,str) or not answer.strip():
+            # An empty answer is usually a spent reasoning budget on that
+            # model, not a provider outage. Cool it for the rest of the
+            # cycle so the next agent does not pay for the same empty
+            # reply; the fallback chain is untouched.
+            if provider in ('openrouter','gemini'):
+                if not self.is_model_cooling_down(model):self.set_model_cooldown(model,SLOW_MODEL_COOLDOWN_SECONDS)
+            else:
+                self.cooldown(provider,SLOW_MODEL_COOLDOWN_SECONDS)
+            raise RoutingError(provider+' returned no visible answer')
         return answer
     def call(self,messages,tools=None,callbacks=None,available_functions=None,**kwargs):
         if isinstance(messages,str):messages=[{'role':'user','content':messages}]
@@ -280,14 +308,22 @@ class RoutedLLM(BaseLLM):
                     for candidate in openrouter_models(self.cfg,vision=vision):
                         if self.is_model_cooling_down(candidate):continue
                         try:answer=self.request(provider,messages,model=candidate);used_model=candidate;break
-                        except (RoutingError,ValueError,KeyError,IndexError,requests.RequestException):continue
+                        except (RoutingError,ValueError,KeyError,IndexError,requests.RequestException):
+                            # Fail fast for the whole cycle: a model that
+                            # failed for any reason this call must not be
+                            # retried by the next agent. Longer terminal
+                            # cooldowns set inside request() are kept.
+                            if not self.is_model_cooling_down(candidate):self.set_model_cooldown(candidate,SLOW_MODEL_COOLDOWN_SECONDS)
+                            continue
                     if answer is None:raise RoutingError('No OpenRouter free model answered')
                 elif provider=='gemini':
                     answer=None
                     for candidate in gemini_models(self.cfg):
                         if self.is_model_cooling_down(candidate):continue
                         try:answer=self.request(provider,messages,model=candidate);used_model=candidate;break
-                        except (RoutingError,ValueError,KeyError,IndexError,requests.RequestException):continue
+                        except (RoutingError,ValueError,KeyError,IndexError,requests.RequestException):
+                            if not self.is_model_cooling_down(candidate):self.set_model_cooldown(candidate,SLOW_MODEL_COOLDOWN_SECONDS)
+                            continue
                     if answer is None:raise RoutingError('No Gemini model answered')
                 else:
                     answer=self.request(provider,messages);used_model=self.cfg.get(provider.upper()+'_MODEL',DEFAULTS[provider])

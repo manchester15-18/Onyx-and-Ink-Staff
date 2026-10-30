@@ -79,3 +79,66 @@ class SquareCommerce:
                     'file': (Path(image_path).name, image, 'image/png'),
                     'request': (None, payload)})
         return {'square_item_id': square_id, 'environment': self.mode}
+
+    def locations(self):
+        return self._request('GET', '/locations').get('locations', [])
+
+    def find_variation(self, item_name):
+        item_id = self.find_item_by_name(item_name)
+        if not item_id:
+            raise ValueError('No Square catalog item named %s exists.' % item_name)
+        item = self._request('GET', '/catalog/object/' + item_id).get('object', {})
+        variations = item.get('item_data', {}).get('variations', [])
+        if not variations:
+            raise ValueError('Square catalog item %s has no variation to stock.' % item_name)
+        variation = variations[0]
+        return {'item_id': item_id, 'variation_id': variation.get('id', ''),
+                'variation_name': variation.get('item_variation_data', {}).get('name', '')}
+
+    def get_inventory_count(self, variation_id, location_id):
+        data = self._request('GET', '/inventory/counts?catalog_object_id=' + variation_id +
+                             '&location_ids=' + location_id)
+        total = 0
+        for count in data.get('counts', []):
+            if count.get('state') == 'IN_STOCK':
+                try:
+                    total += int(count.get('quantity', 0))
+                except (TypeError, ValueError):
+                    pass
+        return total
+
+    def set_inventory(self, item_name, quantity, location_id=''):
+        """Set exact production stock via a physical count. Production only.
+
+        The sandbox token can never set production stock, so this refuses
+        outright unless SQUARE_ENVIRONMENT is production — a sandbox
+        count must never be mistaken for a production one. Quantities
+        are never invented by the caller: the agent action passes only
+        James-approved numbers.
+        """
+        if self.mode != 'production':
+            raise RuntimeError('Square is in sandbox mode. Production stock needs a production '
+                               'access token and SQUARE_ENVIRONMENT=production; refusing a sandbox count.')
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 0 or quantity > 100000:
+            raise ValueError('Use a whole stock quantity from 0 to 100000.')
+        variation = self.find_variation(item_name)
+        if not location_id:
+            places = self.locations()
+            if not places:
+                raise ValueError('No Square location exists to hold stock.')
+            if len(places) > 1:
+                raise ValueError('More than one Square location exists; pass location_id explicitly.')
+            location_id = places[0].get('id', '')
+        before = self.get_inventory_count(variation['variation_id'], location_id)
+        from datetime import datetime, timezone
+        occurred = datetime.now(timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')
+        self._request('POST', '/inventory/changes', json={
+            'idempotency_key': str(uuid.uuid4()),
+            'changes': [{'type': 'PHYSICAL_COUNT', 'physical_count': {
+                'catalog_object_id': variation['variation_id'],
+                'location_id': location_id, 'quantity': str(quantity),
+                'occurred_at': occurred}}]})
+        after = self.get_inventory_count(variation['variation_id'], location_id)
+        return {'item': item_name, 'variation_id': variation['variation_id'],
+                'location_id': location_id, 'before': before, 'quantity': quantity,
+                'after': after, 'environment': self.mode}
