@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from staff.voice import chunk_text, load_profiles, tune_voice, log_voice_send
-from staff.agent_chat import TelegramBridge, VOICES, AgentChat
+from staff.agent_chat import TelegramBridge, VOICES, AgentChat, parse_voice_command
 from staff.media_tools import convert_audio
 from staff.tool_tasks import tool_results_context
 
@@ -198,6 +198,66 @@ class ContextExclusionTests(unittest.TestCase):
         self.assertIn('Widget staged', context)
         self.assertNotIn('telegram_voice', context)
         self.assertNotIn('Voice message sent', context)
+
+
+class VoiceCommandParseTests(unittest.TestCase):
+    def test_private_voice_prefix_is_stripped(self):
+        self.assertEqual(parse_voice_command('/voice hello', False), (True, 'hello'))
+        self.assertEqual(parse_voice_command('/voice hello', True), (True, 'hello'))
+
+    def test_group_prestripped_text_stays_a_voice_turn(self):
+        self.assertEqual(parse_voice_command('hello', True), (True, 'hello'))
+
+    def test_plain_text_is_not_a_voice_turn(self):
+        self.assertEqual(parse_voice_command('hello', False), (False, 'hello'))
+
+    def test_bare_voice_command_and_case(self):
+        self.assertEqual(parse_voice_command('/voice', False), (True, ''))
+        self.assertEqual(parse_voice_command('/VOICE Hey', False), (True, 'Hey'))
+
+
+class VoiceNoToolsTests(unittest.TestCase):
+    def test_voice_turn_bypasses_the_tool_loop(self):
+        import tempfile
+
+        class FakeLLM:
+            def call(self, messages):
+                return 'Hello by voice'
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '.env').write_text('AGENT_TOOLS_ENABLED=true\n')
+            chat = AgentChat(root)
+            chat.get_llm = lambda cfg, agent='Cameron': FakeLLM()
+            act_calls = []
+            with patch.object(AgentChat, 'act', side_effect=lambda *a, **k: act_calls.append(1)):
+                answer = chat.ask('Cameron', 'message Morgan about the launch',
+                                  'telegram:123', source='telegram', no_tools=True)
+        self.assertEqual(act_calls, [])
+        self.assertEqual(answer, 'Hello by voice')
+
+
+class RegisterCommandsTests(unittest.TestCase):
+    def test_voice_command_is_published(self):
+        bridge = TelegramBridge(Path('/tmp'), None, None, agent='Cameron')
+        seen = {}
+        bridge.api = lambda token, method, data: seen.setdefault('call', (token, method, data))
+        bridge.register_commands('tok')
+        token, method, data = seen['call']
+        self.assertEqual(token, 'tok')
+        self.assertEqual(method, 'setMyCommands')
+        names = [c['command'] for c in data['commands']]
+        self.assertIn('voice', names)
+        self.assertIn('pair', names)
+
+    def test_general_bot_also_lists_agents(self):
+        bridge = TelegramBridge(Path('/tmp'), None, None, agent='')
+        seen = {}
+        bridge.api = lambda token, method, data: seen.setdefault('call', (token, method, data))
+        bridge.register_commands('tok')
+        names = [c['command'] for c in seen['call'][2]['commands']]
+        self.assertIn('voice', names)
+        self.assertIn('morgan', names)
 
 
 if __name__ == '__main__':

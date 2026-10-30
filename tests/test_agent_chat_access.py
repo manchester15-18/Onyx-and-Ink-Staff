@@ -177,7 +177,7 @@ class ChatAccessTests(unittest.TestCase):
 
     def test_telegram_command_menu_includes_pairing_and_all_staff(self):
         commands=TelegramBridge.commands()
-        self.assertEqual([item['command'] for item in commands],['pair','morgan','avery','jordan','cameron','help'])
+        self.assertEqual([item['command'] for item in commands],['voice','start','pair','morgan','avery','jordan','cameron','help'])
         self.assertTrue(all(set(item)=={'command','description'} for item in commands))
 
     def test_telegram_file_download_stays_bounded_and_uses_safe_upload_store(self):

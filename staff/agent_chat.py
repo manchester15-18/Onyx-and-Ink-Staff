@@ -67,7 +67,7 @@ class AgentChat:
         with closing(self.db()) as db:
             rows=db.execute('SELECT role,body,source,created FROM messages WHERE agent=? ORDER BY id DESC LIMIT 50',(agent,)).fetchall()
         return [dict(zip(('role','body','source','created'),row)) for row in reversed(rows)]
-    def ask(self,agent,body,request_id,source='dashboard',attachments=None):
+    def ask(self,agent,body,request_id,source='dashboard',attachments=None,no_tools=False):
         if agent not in ROLES or not body.strip() or len(body)>4000 or not re.fullmatch(r'(?:[a-f0-9-]{36}|telegram:\d+|discord:\d+)',request_id):raise ValueError('Choose an agent and a message under 4,000 characters.')
         cfg=dotenv_values(self.root/'.env')
         from staff.multimodal import prepare
@@ -124,7 +124,7 @@ class AgentChat:
                 result=Actions(self.root,agent,request_id).execute('design',{'prompt':body,'model':'schnell'})
                 if result.get('error'):answer='I could not generate that design: '+str(result['error'])
                 else:answer='I created the design.\n\nAction results:\n'+str(result.get('name','Design'))+': '+str(result.get('url','generated PNG'))
-            elif cfg.get('AGENT_TOOLS_ENABLED') == 'true' and (source in ('email','staff_email') or self.needs_tools(body)):
+            elif not no_tools and cfg.get('AGENT_TOOLS_ENABLED') == 'true' and (source in ('email','staff_email') or self.needs_tools(body)):
                 if presentation_request:
                     messages[0]['content']+=' The CEO requested a multi-slide deliverable. Your first action must be presentation with a concise title and 3–15 complete slides. This must create native Google Slides; do not answer with an outline or a Canva/Figma claim.'
                 elif CREATIVE_WORKSPACE_TERMS.search(body):
@@ -285,6 +285,20 @@ class AgentChat:
             if len(messages)>7:messages=messages[:1]+messages[-6:]
         return 'This request reached its action limit. Completed results are listed below. Send a follow-up for additional work.\n'+'\n'.join(receipts)
 
+def parse_voice_command(text, was_voice):
+    """Split a /voice command from its message. Returns (voice_reply, text).
+
+    A group /voice turn arrives pre-stripped by addressed_in_group, so
+    was_voice alone must keep it a voice turn; a private /voice turn still
+    carries the prefix, so strip it here. Without this, the private path
+    asked the agent to answer "/voice hello" itself.
+    """
+    match = re.match(r'^/voice(?:\s+(.*))?$', (text or '').strip(), re.I | re.S)
+    if match:
+        return True, (match[1] or '')
+    return bool(was_voice), text
+
+
 class TelegramBridge:
     def __init__(self,root,chat,stop,agent='',token_key='TELEGRAM_BOT_TOKEN'):
         self.root=root;self.chat=chat;self.stop=stop;self.agent=agent;self.token_key=token_key;self.pair_code=None;self.pair_expiry=0;self.identity=None
@@ -330,6 +344,8 @@ class TelegramBridge:
     @staticmethod
     def commands():
         return [
+            {'command':'voice','description':'Reply with a voice message'},
+            {'command':'start','description':'Welcome and pairing help'},
             {'command':'pair','description':'Connect this private chat to the dashboard'},
             {'command':'morgan','description':'Chat with Morgan, Operations'},
             {'command':'avery','description':'Chat with Avery, Marketing'},
@@ -452,7 +468,17 @@ class TelegramBridge:
         except ValueError:raise RuntimeError('Telegram returned an invalid response.') from None
         if not result.get('ok'):raise RuntimeError('Telegram rejected this request.')
         return result['result']
+    def register_commands(self,token):
+        """Publish the bot's command list so /voice pops up when typing /."""
+        return self.api(token,'setMyCommands',{'commands':self.commands()})
+
     def run(self):
+        try:
+            _token=dotenv_values(self.root/'.env').get(self.token_key,'')
+            if _token and self.state().get('enabled'):
+                self.register_commands(_token)
+        except Exception:
+            pass
         while not self.stop.wait(3):
             state=self.state();token=dotenv_values(self.root/'.env').get(self.token_key,'')
             if not token or not state.get('enabled'):continue
@@ -532,10 +558,7 @@ class TelegramBridge:
                             self.send(token,msg,'This topic is not assigned yet. Send /morgan, /avery, /jordan, or /cameron here to make it that agent’s separate chat.')
                             continue
                     else:agent=state['users'][user]
-                    voice_reply=was_voice
-                    if not voice_reply:
-                        voice_match=re.match(r'^/voice(?:\s+(.*))?$',text.strip(),re.I|re.S)
-                        if voice_match:voice_reply=True;text=(voice_match[1] or '')
+                    voice_reply,text=parse_voice_command(text,was_voice)
                     if voice_reply and not text and not (msg.get('document') or msg.get('photo') or msg.get('voice') or msg.get('audio')):
                         self.send(token,msg,'Send /voice followed by your message and I will reply with a voice message.');continue
                     try:upload=self.incoming_file(token,msg)
@@ -571,21 +594,24 @@ class TelegramBridge:
                     if staff_note:
                         body+='\n\nYou are replying to a fellow staff agent in the group, not to the CEO.'
                     if voice_reply:
-                        body+='\n\nReply as a voice message: speak naturally in your own voice, keep it conversational and under about 250 words, and do not use formatting, bullets, headings, or stage directions — this text will be read aloud.'
+                        body+='\n\nReply as a voice message: write plain spoken text only, do not use tools, and the system will speak your reply aloud. Keep it conversational and under about 250 words, and do not use formatting, bullets, headings, or stage directions.'
                     self.typing(token,msg)
                     if chat_type!='private':time.sleep({'Morgan':.7,'Jordan':1.1,'Avery':1.5,'Cameron':1.9}.get(agent,.7))
-                    answer=self.chat.ask(agent,body,'telegram:'+str(update['update_id']),source='telegram',attachments=[] if is_audio else paths)
+                    answer=self.chat.ask(agent,body,'telegram:'+str(update['update_id']),source='telegram',attachments=[] if is_audio else paths,no_tools=voice_reply)
                     if self.agent:self.set_group_focus(msg,agent)
                     sent_voice=False
                     if voice_reply:
-                        try:
-                            from staff.voice import speak, log_voice_send
-                            spoken=speak(self.root,agent,answer)
-                            self.send_voice(token,msg,spoken['data']);sent_voice=True
-                            try:log_voice_send(self.root,agent,'voice-reply',msg.get('chat',{}).get('id',''),answer,spoken.get('duration_seconds'))
-                            except Exception:pass
-                        except Exception as error:
-                            self.chat.record_cloud_error(agent,'telegram-voice',error)
+                        if not answer.strip():
+                            self.send(token,msg,'I did not have a reply to speak just now. Send your message again and I will answer by voice.')
+                        else:
+                            try:
+                                from staff.voice import speak, log_voice_send
+                                spoken=speak(self.root,agent,answer)
+                                self.send_voice(token,msg,spoken['data']);sent_voice=True
+                                try:log_voice_send(self.root,agent,'voice-reply',msg.get('chat',{}).get('id',''),answer,spoken.get('duration_seconds'))
+                                except Exception:pass
+                            except Exception as error:
+                                self.chat.record_cloud_error(agent,'telegram-voice',error)
                     if not sent_voice:
                         chunks=[answer[i:i+3500] for i in range(0,len(answer),3500)]
                         for index,chunk in enumerate(chunks):
