@@ -1,5 +1,14 @@
 # Application changelog
 
+## 2026-10-31 — Discord voice calls, conversation follower, Telegram removal
+
+- Removed every Telegram bridge, endpoint, and UI reference; the daily brief is Discord-only, and a failed turn no longer reports its gateway as disconnected.
+- Rebuilt Discord as one bot per agent (Morgan hosts the slash commands); per-agent tokens live in Settings and are never echoed back to the page.
+- Fixed voice calls end to end: the voice client now logs in before its gateway loop starts and carries its voice-state handler as a real client method, so /join-voice joins the General channel and /leave-voice leaves it (proven live with an empty-channel experiment).
+- Added a conversation follower for shared channels: a message that names no agent is routed by topic (refund and policy questions to Cameron, site and storefront questions to Jordan, design questions to Avery, everything else to Morgan), and a message with no clear topic stays with the agent that user last talked to in that channel.
+- Chat turns hold no lock across the model call, so two agents can answer two people at the same time.
+- Suite: 375 tests passing.
+
 ## 2026-10-06 — Role-specific cloud AI routing
 
 - Added Gemini, Cerebras, Cloudflare, Mistral, and OpenRouter adapters alongside Groq, with role-specific routing for chat, drafts, inbox replies, and autonomous work.

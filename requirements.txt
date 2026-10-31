@@ -10,3 +10,7 @@ PyMuPDF>=1.26,<2
 
 websocket-client==1.9.0
 playwright>=1.49
+discord.py[voice]==2.7.1
+discord-ext-voice-recv==0.5.2a179
+webrtcvad==2.0.10
+setuptools<81

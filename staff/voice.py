@@ -1,16 +1,24 @@
-"""Agent voices for Telegram: persistent per-agent voice profiles, speech
-synthesis to Telegram voice messages, and voice-note transcription.
+"""Agent voices for Discord: persistent per-agent voice profiles, speech
+synthesis to Discord voice messages, and voice-note transcription.
 
-Provider today is Cloudflare Workers AI: MeloTTS for speech, Whisper for
-transcription. MeloTTS renders one voice per language, so the profiles
-below capture each agent's gender, direction, and identity now and map
-to distinct provider voice IDs when a multi-voice provider (for example
-ElevenLabs) is connected. Nothing here invents a voice: speak() raises
-on any provider failure instead of returning placeholder audio.
+Speech provider is Gemini text-to-speech first: each agent has a designed
+voice (a persistent voice_... ID created from that agent's profile
+direction, persona tone, and role) rendered through gemini-3.8-flash-tts.
+If Gemini is unavailable for any reason (no key, HTTP error, bad audio),
+speak() falls back to Cloudflare Workers AI MeloTTS rather than failing
+the voice turn; it raises only when both providers fail. MeloTTS renders
+one voice per language, so it is a fallback, not the identity: the
+designed Gemini voice IDs are what make the agents sound distinct.
+Nothing here invents a voice: speak() raises on a dual-provider failure
+instead of returning placeholder audio.
 """
+import base64
 import io
 import json
+import os
 import re
+import urllib.error
+import urllib.request
 import wave
 from pathlib import Path
 
@@ -23,6 +31,7 @@ _DEFAULTS = {
         'model': '@cf/myshell-ai/melotts',
         'lang': 'en',
         'direction': 'Warm, calm, decisive African American woman. AAVE, natural human cadence, crisp pronunciation and enunciation.',
+        'gemini_voice_id': 'voice_tmaxr1l2l0kt',
         'notes': [],
     },
     'Avery': {
@@ -31,6 +40,7 @@ _DEFAULTS = {
         'model': '@cf/myshell-ai/melotts',
         'lang': 'en',
         'direction': 'Creative, energetic African American man. AAVE, natural human cadence, crisp pronunciation and enunciation.',
+        'gemini_voice_id': 'voice_aho1ngj4ul5p',
         'notes': [],
     },
     'Jordan': {
@@ -39,6 +49,7 @@ _DEFAULTS = {
         'model': '@cf/myshell-ai/melotts',
         'lang': 'en',
         'direction': 'Grounded, concise African American man. AAVE, natural human cadence, crisp pronunciation and enunciation.',
+        'gemini_voice_id': 'voice_qqnd9kl9ef9s',
         'notes': [],
     },
     'Cameron': {
@@ -47,6 +58,7 @@ _DEFAULTS = {
         'model': '@cf/myshell-ai/melotts',
         'lang': 'en',
         'direction': 'Measured, considerate African American man. AAVE, natural human cadence, crisp pronunciation and enunciation.',
+        'gemini_voice_id': 'voice_90zh7jkztuox',
         'notes': [],
     },
 }
@@ -80,20 +92,23 @@ def load_profiles(root):
     return profiles
 
 
-def log_voice_send(root, agent, kind, chat, text, duration_seconds=None):
+def log_voice_send(root, agent, kind, chat, text, duration_seconds=None, provider=None):
     """Append one voice-send record to the voice log.
 
     This is where voice confirmations belong: the log records what was
     sent, by whom, and where. It is never posted to chat or spoken, so a
     send never produces a second announcement message. Best-effort callers
     swallow errors from this function; a logging failure must not fail
-    a send that already succeeded.
+    a send that already succeeded. The provider is recorded when known,
+    so a later debug can tell which text-to-speech engine rendered a send.
     """
     path = Path(root) / 'work' / 'voice-messages.jsonl'
     path.parent.mkdir(exist_ok=True)
     record = {'time': __import__('time').time(), 'agent': agent, 'kind': kind,
               'chat': str(chat or ''), 'text': ' '.join(str(text or '').split())[:3000],
               'duration_seconds': duration_seconds}
+    if provider:
+        record['provider'] = provider
     try:
         lines = path.read_text(encoding='utf-8').splitlines()
     except (OSError, ValueError):
@@ -175,23 +190,100 @@ def _concat_wav(chunks):
     return out.getvalue(), params
 
 
-def speak(root, agent, text):
-    """Render text in the agent's voice. Returns Ogg Opus bytes for Telegram.
+def _gemini_api_key(root):
+    """Gemini API key from the environment, else the project's .env file."""
+    key = os.environ.get('GEMINI_API_KEY', '')
+    if key:
+        return key
+    try:
+        from dotenv import dotenv_values
+        return dotenv_values(Path(root) / '.env').get('GEMINI_API_KEY', '')
+    except Exception:  # noqa: BLE001 - missing key is a fallback trigger, not an error
+        return ''
 
-    Raises on any failure (no placeholder audio); callers fall back to text.
+
+def _gemini_synthesize_chunk(root, voice_id, text):
+    """One Gemini TTS chunk. Returns (wav_bytes, duration_seconds)."""
+    key = _gemini_api_key(root)
+    if not key:
+        raise RuntimeError('Gemini API key is not configured.')
+    body = json.dumps({
+        'contents': [{'parts': [{'text': text}]}],
+        'generationConfig': {
+            'responseModalities': ['AUDIO'],
+            'speechConfig': {'voiceConfig': {'voice': voice_id}},
+        },
+    }).encode()
+    req = urllib.request.Request(
+        'https://generativelanguage.googleapis.com/v1beta/models/'
+        'gemini-3.8-flash-tts:generateContent',
+        data=body,
+        headers={'Content-Type': 'application/json', 'x-goog-api-key': key},
+        method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            payload = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError('Gemini voice synthesis failed (HTTP %s).' % e.code)
+    except Exception as e:  # noqa: BLE001 - surfaced as a fallback trigger
+        raise RuntimeError('Gemini voice synthesis failed: %s' % type(e).__name__)
+    parts = ((payload.get('candidates') or [{}])[0].get('content') or {}).get('parts') or []
+    blob = next((p.get('inlineData') for p in parts if p.get('inlineData')), None)
+    if not blob or not blob.get('data'):
+        raise RuntimeError('Gemini voice synthesis returned no audio.')
+    wav = base64.b64decode(blob['data'])
+    if wav[:4] != b'RIFF':
+        raise RuntimeError('Gemini voice synthesis returned non-WAV audio.')
+    with wave.open(io.BytesIO(wav)) as clip:
+        duration = clip.getnframes() / clip.getframerate()
+    return wav, duration
+
+
+def _speak_gemini(root, agent, chunks, voice_id, profile):
+    """Render chunks with the agent's designed Gemini voice. Returns speak()'s dict."""
+    try:
+        from staff.media_tools import convert_audio
+    except ImportError:
+        from media_tools import convert_audio
+    wavs = []
+    duration = 0.0
+    for piece in chunks:
+        wav, piece_duration = _gemini_synthesize_chunk(root, voice_id, piece)
+        wavs.append(wav)
+        duration += piece_duration
+    combined, _params = _concat_wav(wavs)
+    ogg = convert_audio(combined, 'ogg')
+    return {'data': ogg, 'format': 'OGG', 'duration_seconds': round(duration, 2),
+            'provider': 'Gemini text-to-speech',
+            'voice': profile}
+
+
+def speak(root, agent, text):
+    """Render text in the agent's voice. Returns Ogg Opus bytes for Discord.
+
+    Tries the agent's designed Gemini voice first; on any Gemini failure
+    falls back to MeloTTS. Raises only when both providers fail (callers
+    then fall back to text). Validation errors always raise.
     """
     if agent not in _DEFAULTS:
         raise ValueError('Choose Morgan, Avery, Jordan, or Cameron.')
     text = ' '.join(str(text or '').split())
     if not text or len(text) > MAX_SPEAK_CHARS:
         raise ValueError('Voice messages must be 1-%d characters.' % MAX_SPEAK_CHARS)
+    chunks = chunk_text(text)
+    if not chunks or len(chunks) > 4:
+        raise ValueError('Voice message is too long to render.')
+    profile = load_profiles(root)[agent]
+    voice_id = profile.get('gemini_voice_id') or ''
+    if voice_id:
+        try:
+            return _speak_gemini(root, agent, chunks, voice_id, profile)
+        except Exception:  # noqa: BLE001 - Gemini failure falls back to MeloTTS by design
+            pass
     try:
         from staff.media_tools import generate_audio, convert_audio
     except ImportError:
         from media_tools import generate_audio, convert_audio
-    chunks = chunk_text(text)
-    if not chunks or len(chunks) > 4:
-        raise ValueError('Voice message is too long to render.')
     wavs = []
     duration = 0.0
     for piece in chunks:
@@ -202,7 +294,7 @@ def speak(root, agent, text):
     ogg = convert_audio(combined, 'ogg')
     return {'data': ogg, 'format': 'OGG', 'duration_seconds': round(duration, 2),
             'provider': 'Cloudflare Workers AI text-to-speech',
-            'voice': load_profiles(root)[agent]}
+            'voice': profile}
 
 
 def _to_wav(audio_bytes, suffix):
@@ -227,7 +319,7 @@ def _to_wav(audio_bytes, suffix):
 
 
 def transcribe(root, audio_bytes, suffix='.ogg'):
-    """Transcribe a Telegram voice/audio message via Cloudflare Whisper."""
+    """Transcribe a Discord voice/audio message via Cloudflare Whisper."""
     import requests
     from dotenv import dotenv_values
     if not audio_bytes or len(audio_bytes) > 10_000_000:

@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=8765
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git lsof procps ca-certificates nodejs npm ffmpeg \
+    && apt-get install -y --no-install-recommends git lsof procps ca-certificates nodejs npm ffmpeg gcc libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Node 20 LTS (Debian trixie package, 20.19.x) for npm-based Jordan tools:

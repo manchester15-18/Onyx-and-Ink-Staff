@@ -47,14 +47,12 @@ MAILBOX = Mailbox(ROOT)
 STOP = threading.Event()
 DESIRED = ROOT/'work'/'monitor-enabled.json'
 from staff.dashboard_access import Access
-from staff.agent_chat import AgentChat, TelegramBridge
+from staff.agent_chat import AgentChat
 from staff.discord_bridge import DiscordBridge
 from staff.agent_actions import Actions
 from staff.model_routing import routing_status, DEFAULTS
 ACCESS = Access(ROOT)
 CHAT = AgentChat(ROOT)
-TELEGRAM = TelegramBridge(ROOT,CHAT,STOP)
-TELEGRAM_AGENTS={name:TelegramBridge(ROOT,CHAT,STOP,name,'TELEGRAM_'+name.upper()+'_BOT_TOKEN') for name,_,_ in STAFF}
 DISCORD = DiscordBridge(ROOT,CHAT,STOP)
 AUTONOMY = StaffAutonomy(ROOT)
 
@@ -145,21 +143,17 @@ def supervise():
             except (ValueError,OSError):pass
             try:post_daily_brief()
             except Exception:pass
-            try:post_daily_staff_handoffs()
-            except Exception:pass
 
 
 def post_daily_brief(force=False):
     """Publish one concise Morgan assignment brief each local day to a channel."""
-    config=dotenv_values(ROOT/'.env');target=str(config.get('TELEGRAM_DAILY_BRIEF_CHAT','')).strip()
-    token=config.get('TELEGRAM_MORGAN_BOT_TOKEN','')
-    discord_ready=DISCORD.enabled() and bool(str(config.get('DISCORD_DAILY_BRIEF_CHANNEL_ID','')).strip() or str(config.get('DISCORD_STAFF_CHANNEL_ID','')).strip())
-    if (not target or not token) and not discord_ready:return False
-    if target and not re.fullmatch(r'(?:-?\d{5,20}|@[A-Za-z][A-Za-z0-9_]{4,31})',target):return False
+    config=dotenv_values(ROOT/'.env')
+    discord_ready=bool(str(config.get('DISCORD_ENABLED','')).lower()=='true' and (config.get('DISCORD_MORGAN_BOT_TOKEN') or config.get('DISCORD_BOT_TOKEN'))) and bool(str(config.get('DISCORD_DAILY_BRIEF_CHANNEL_ID','')).strip() or str(config.get('DISCORD_STAFF_CHANNEL_ID','')).strip())
+    if not discord_ready:return False
     from zoneinfo import ZoneInfo
-    now=datetime.now(ZoneInfo('America/New_York'));scheduled=str(config.get('TELEGRAM_DAILY_BRIEF_TIME','09:00')).strip()
+    now=datetime.now(ZoneInfo('America/New_York'));scheduled=str(config.get('DAILY_BRIEF_TIME','09:00')).strip()
     if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',scheduled):scheduled='09:00'
-    path=ROOT/'work'/'telegram-daily-brief.json'
+    path=ROOT/'work'/'daily-brief.json'
     try:state=json.loads(path.read_text())
     except (OSError,ValueError,TypeError):state={}
     if not force and (now.strftime('%H:%M')<scheduled or state.get('day')==now.date().isoformat()):return False
@@ -178,34 +172,9 @@ def post_daily_brief(force=False):
         else:lines.append('• '+label+': review the project overview and record the next assignment.')
     lines.extend(['', 'Reply in the appropriate agent chat with blockers or completed work.'])
     text='\n'.join(lines)[:3900]
-    if target and token: TELEGRAM_AGENTS['Morgan'].api(token,'sendMessage',{'chat_id':target,'text':text})
-    if discord_ready: DISCORD.daily_brief(text)
-    atomic_write_json(path,{'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target},secure=True)
-    return True
-
-
-def post_daily_staff_handoffs(force=False):
-    """Let Morgan open one bounded, targeted staff-group check-in each day."""
-    config=dotenv_values(ROOT/'.env');target=str(config.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
-    token=config.get('TELEGRAM_MORGAN_BOT_TOKEN','')
-    if not target or not token or not re.fullmatch(r'-?\d{5,20}',target):return False
-    from zoneinfo import ZoneInfo
-    now=datetime.now(ZoneInfo('America/New_York'));scheduled=str(config.get('TELEGRAM_AGENT_HANDOFF_TIME','09:15')).strip()
-    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',scheduled):scheduled='09:15'
-    path=ROOT/'work'/'telegram-staff-handoff.json'
-    try:state=json.loads(path.read_text())
-    except (OSError,ValueError,TypeError):state={}
-    if not force and (now.strftime('%H:%M')<scheduled or state.get('day')==now.date().isoformat()):return False
-    project,name,folder=active_project(ROOT)
-    roles={'Avery':'avery-marketing.md','Jordan':'jordan-web-it.md','Cameron':'cameron-hr-legal.md'}
-    bridge=TELEGRAM_AGENTS['Morgan'];sent=[]
-    for agent,filename in roles.items():
-        report=folder/'agent-reports'/filename
-        context=report.read_text(encoding='utf-8').strip().replace('\n',' ')[:700] if report.exists() else 'No saved report yet; review the project overview.'
-        message='[[ONYX_STAFF target='+agent+' hops=1]] Daily check-in for '+name+'. Review your current assignment: '+context+' State your next concrete action and any blocker for Morgan.'
-        bridge.api(token,'sendMessage',{'chat_id':target,'text':message})
-        sent.append(agent)
-    atomic_write_json(path,{'day':now.date().isoformat(),'posted':now.isoformat(),'chat':target,'agents':sent},secure=True)
+    DISCORD.daily_brief(text)
+    channel=str(config.get('DISCORD_DAILY_BRIEF_CHANNEL_ID','')).strip() or str(config.get('DISCORD_STAFF_CHANNEL_ID','')).strip()
+    atomic_write_json(path,{'day':now.date().isoformat(),'posted':now.isoformat(),'chat':channel},secure=True)
     return True
 
 
@@ -236,6 +205,12 @@ def report_display_name(path,relative):
         when=datetime.strptime('-'.join(assignment.split('-')[:2]),'%Y%m%d-%H%M%S')
         return when.strftime('%b %d, %Y · %I:%M %p').replace(' 0',' ')+' · '+title
     except ValueError:return title
+
+
+def _discord_agent_state(name):
+    try:state=json.loads((ROOT/'work'/('discord-state-'+name.lower()+'.json')).read_text())
+    except (OSError,ValueError,TypeError):return {'connected':False,'lastError':''}
+    return {'connected':bool(state.get('connected')),'lastError':str(state.get('lastError',''))[:120]}
 
 
 def snapshot():
@@ -297,7 +272,7 @@ def snapshot():
     return {'modelSettings':model_settings,'modelRouting':routing_status(config),'cleanupDays':InboxState(ROOT).days(),'artifacts':artifacts,'actions':tools.recent(),'integrations':{'workspace':workspace_status(),'cloudflare':bool(config.get('CLOUDFLARE_API_TOKEN') and config.get('CLOUDFLARE_ACCOUNT_ID')),'freePlan':config.get('CLOUDFLARE_FREE_PLAN_CONFIRMED')=='true','cloudflareTest':provider_status('cloudflare'),'tavily':bool(config.get('TAVILY_API_KEY')),'tavilyTest':provider_status('tavily'),'square':bool(config.get('SQUARE_ACCESS_TOKEN')),'squareEnvironment':config.get('SQUARE_ENVIRONMENT','sandbox'),'cloudflarePagesProject':config.get('CLOUDFLARE_PAGES_PROJECT','')},'mode':config.get('STAFF_EMAIL_MODE','off'),'internalMode':config.get('STAFF_INTERNAL_EMAIL_MODE','draft'),'monitor':monitor_active(),'managed':bool(monitor_active()),'enabled':desired(),'autonomy':AUTONOMY.status(),'workStatus':work_status,'staffTasks':staff_task_status(ROOT),
         'authorized':(ROOT/'work'/'google-mail-token.json').exists(),'agents':[{'name':n,'role':r,'email':config.get(k,'')} for n,r,k in STAFF],'businessWebsite':config.get('BUSINESS_WEBSITE','https://onyxandink.org'),'importantCc':config.get('IMPORTANT_CC_EMAIL',''),
         'signatures':signature_settings(ROOT,addresses,website),
-        'wifi':{'enabled':True if CLOUD_MODE else bool(ACCESS.settings().get('enabled')),'url':PUBLIC_ORIGIN if CLOUD_MODE else next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),''),'cloud':CLOUD_MODE},'telegram':{'configured':bool(config.get('TELEGRAM_BOT_TOKEN')),'enabled':TELEGRAM.state().get('enabled',False),'paired':len(TELEGRAM.state().get('users',{})),'staffGroup':config.get('TELEGRAM_AGENT_GROUP_CHAT',''),'dailyBrief':{'chat':config.get('TELEGRAM_DAILY_BRIEF_CHAT',''),'time':config.get('TELEGRAM_DAILY_BRIEF_TIME','09:00'),'configured':bool(config.get('TELEGRAM_DAILY_BRIEF_CHAT'))},'agents':{name:{'configured':bool(config.get('TELEGRAM_'+name.upper()+'_BOT_TOKEN')),'enabled':bridge.state().get('enabled',False),'paired':len(bridge.state().get('users',{}))} for name,bridge in TELEGRAM_AGENTS.items()}},'discord':{'configured':bool(config.get('DISCORD_BOT_TOKEN')),'enabled':str(config.get('DISCORD_ENABLED','')).lower()=='true','guild':config.get('DISCORD_GUILD_ID',''),'staffChannel':config.get('DISCORD_STAFF_CHANNEL_ID',''),'requestsChannel':config.get('DISCORD_AGENT_REQUESTS_CHANNEL_ID',''),'dailyBriefChannel':config.get('DISCORD_DAILY_BRIEF_CHANNEL_ID',''),'agents':{name:{'channel':config.get('DISCORD_'+name.upper()+'_CHANNEL_ID',''),'configured':bool(config.get('DISCORD_'+name.upper()+'_BOT_TOKEN'))} for name,_,_ in STAFF},'state':DISCORD.state()},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'projectOverviews':project_overviews,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'James · CEO','email':config.get('OWNER_EMAIL','')},{'name':'Jaunee','label':'Jaunee · Vice President','email':config.get('IMPORTANT_CC_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
+        'wifi':{'enabled':True if CLOUD_MODE else bool(ACCESS.settings().get('enabled')),'url':PUBLIC_ORIGIN if CLOUD_MODE else next(('https://'+host+':8766' for host in ACCESS.settings().get('hosts',[]) if host not in ('localhost','127.0.0.1')),''),'cloud':CLOUD_MODE},'discord':{'configured':bool(config.get('DISCORD_BOT_TOKEN') or any(config.get('DISCORD_'+n.upper()+'_BOT_TOKEN') for n,_,_ in STAFF)),'enabled':str(config.get('DISCORD_ENABLED','')).lower()=='true','guild':config.get('DISCORD_GUILD_ID',''),'staffChannel':config.get('DISCORD_STAFF_CHANNEL_ID',''),'requestsChannel':config.get('DISCORD_AGENT_REQUESTS_CHANNEL_ID',''),'dailyBriefChannel':config.get('DISCORD_DAILY_BRIEF_CHANNEL_ID',''),'agents':{name:{'channel':config.get('DISCORD_'+name.upper()+'_CHANNEL_ID',''),'configured':bool(config.get('DISCORD_'+name.upper()+'_BOT_TOKEN')),'connected':(st:=_discord_agent_state(name))['connected'],'lastError':st['lastError']} for name,_,_ in STAFF},'state':DISCORD.state()},'activity':activity,'processed':processed,'reports':reports,'reportProjects':project_list,'projectOverviews':project_overviews,'activeReportProject':next((item['id'] for item in project_list if item['active']),''),'token':TOKEN,'mailboxes':[{'name':'all','label':'All inboxes','email':''},{'name':'Shared','label':'Shared inbox','email':config.get('GOOGLE_MAIL_USER','')},{'name':'Owner','label':'James · CEO','email':config.get('OWNER_EMAIL','')},{'name':'Jaunee','label':'Jaunee · Vice President','email':config.get('IMPORTANT_CC_EMAIL','')},*[{'name':n,'label':n+' · '+r,'email':config.get(k,'')} for n,r,k in STAFF]]}
 
 
 def outbox_file(identifier):
@@ -495,22 +470,6 @@ class Handler(BaseHTTPRequestHandler):
                     if not ACCESS.host_pc(self):return self.reply(403,{'error':'Open http://localhost:8765 on the host Windows PC to view the password.'})
                     try:return self.reply(200,{'password':ACCESS.local_password()})
                     except RuntimeError as error:return self.reply(409,{'error':str(error)})
-                elif self.path in ('/api/telegram','/api/telegram-check'):
-                    token=str(data.get('token','')).strip()
-                    if token and not re.fullmatch(r'\d+:[A-Za-z0-9_-]{20,256}',token):raise ValueError('Enter a valid Telegram bot token.')
-                    configured=token or dotenv_values(ROOT/'.env').get('TELEGRAM_BOT_TOKEN','')
-                    if not configured:return self.reply(400,{'error':'Enter a Telegram bot token first.'})
-                    try:bot=TELEGRAM.api(configured,'getMe',{})
-                    except RuntimeError as error:return self.reply(400,{'error':str(error)+' Get a current token from BotFather and save it locally.'})
-                    try:TELEGRAM.api(configured,'setMyCommands',{'commands':TELEGRAM.commands()})
-                    except RuntimeError as error:return self.reply(400,{'error':'Telegram bot commands could not be registered: '+str(error)})
-                    username=str(bot.get('username','')).strip()
-                    message='Telegram connection verified'+(' for @'+username if username else '')+'.'
-                    if self.path=='/api/telegram-check':return self.reply(200,{'message':message})
-                    if token:
-                        set_key(str(ROOT/'.env'),'TELEGRAM_BOT_TOKEN',token,quote_mode='never')
-                    bridge=TELEGRAM.state();bridge['enabled']=bool(data.get('enabled'));bridge.pop('lastError',None);TELEGRAM.save(bridge)
-                    return self.reply(200,{'message':message+(' Private-chat polling is enabled.' if bridge['enabled'] else ' Saved but polling remains disabled.')})
                 elif self.path=='/api/workspace-authorize':
                     # Google Desktop OAuth permits a loopback callback only. Keep all other
                     # dashboard settings available on the LAN, but require this one-time sign-in
@@ -592,7 +551,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200,{'message':label+' selected. New agent reports will save to this project.','project':slug})
                 elif self.path=='/api/project-overview':
                     result=save_project_overview(ROOT,str(data.get('project','')),str(data.get('body','')))
-                    return self.reply(200,{'message':'Project overview saved. New dashboard and Telegram conversations receive it.','overview':result})
+                    return self.reply(200,{'message':'Project overview saved. New dashboard and Discord conversations receive it.','overview':result})
                 elif self.path=='/api/create-report':
                     result=create_report(ROOT,str(data.get('project','')),str(data.get('agent','')),str(data.get('title','')),clean(str(data.get('body',''))))
                     return self.reply(200,{'message':'Report created in '+result['project_name']+'.','report':result})
@@ -621,42 +580,8 @@ class Handler(BaseHTTPRequestHandler):
                         if mail.oauth:mail.oauth.smtp_login(client)
                         else:client.login(*mail.credentials['Morgan'])
                     return self.reply(200,{'message':'SMTP authentication successful. No email sent. Approve a new draft to test delivery.'})
-                elif self.path=='/api/telegram-agents':
-                    tokens=data.get('tokens',{});enabled=data.get('enabled',{})
-                    if not isinstance(tokens,dict) or not isinstance(enabled,dict) or set(tokens)-set(TELEGRAM_AGENTS) or set(enabled)-set(TELEGRAM_AGENTS):raise ValueError()
-                    config=dotenv_values(ROOT/'.env');verified=[]
-                    for name,bridge in TELEGRAM_AGENTS.items():
-                        token=str(tokens.get(name,'')).strip();current=token or config.get(bridge.token_key,'')
-                        if token and not re.fullmatch(r'\d+:[A-Za-z0-9_-]{20,256}',token):raise ValueError('Enter a valid '+name+' bot token.')
-                        if enabled.get(name) and not current:return self.reply(400,{'error':'Enter and save the '+name+' bot token before enabling it.'})
-                        if current and (token or enabled.get(name)):
-                            try:bot=bridge.api(current,'getMe',{});bridge.api(current,'setMyCommands',{'commands':[{'command':'pair','description':'Connect this private chat to the dashboard'},{'command':'help','description':'Show connection instructions'}]})
-                            except RuntimeError as error:return self.reply(400,{'error':name+': '+str(error)})
-                            verified.append('@'+str(bot.get('username','')).lstrip('@'))
-                        if token:set_key(str(ROOT/'.env'),bridge.token_key,token,quote_mode='never')
-                        state=bridge.state();state['enabled']=bool(enabled.get(name));state.pop('lastError',None);bridge.save(state)
-                    (ROOT/'.env').chmod(0o600)
-                    return self.reply(200,{'message':'Dedicated agent bots saved'+(' and verified: '+', '.join(verified)+'.' if verified else '.')})
-                elif self.path=='/api/telegram-agent-pair':
-                    agent=str(data.get('agent','')).title();bridge=TELEGRAM_AGENTS.get(agent)
-                    if not bridge:raise ValueError('Choose an agent bot.')
-                    if not bridge.state().get('enabled'):return self.reply(409,{'error':'Save and enable the '+agent+' bot before creating a pairing code.'})
-                    return self.reply(200,{'code':bridge.pairing(),'agent':agent})
-                elif self.path=='/api/telegram-daily-brief':
-                    chat=str(data.get('chat','')).strip();when=str(data.get('time','09:00')).strip()
-                    if chat and not re.fullmatch(r'(?:-?\d{5,20}|@[A-Za-z][A-Za-z0-9_]{4,31})',chat):raise ValueError('Enter a channel ID such as -1001234567890 or a public @channelusername.')
-                    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d',when):raise ValueError('Choose a valid daily time.')
-                    if chat and not dotenv_values(ROOT/'.env').get('TELEGRAM_MORGAN_BOT_TOKEN'):return self.reply(409,{'error':'Save Morgan’s dedicated bot before configuring a daily brief.'})
-                    set_key(str(ROOT/'.env'),'TELEGRAM_DAILY_BRIEF_CHAT',chat,quote_mode='never')
-                    set_key(str(ROOT/'.env'),'TELEGRAM_DAILY_BRIEF_TIME',when,quote_mode='never')
-                    (ROOT/'.env').chmod(0o600)
-                    if data.get('test') is True and chat:
-                        try:post_daily_brief(force=True)
-                        except RuntimeError as error:return self.reply(400,{'error':str(error)+' Make Morgan an administrator of the channel and confirm the channel ID.'})
-                        return self.reply(200,{'message':'Daily brief test sent through Morgan.'})
-                    return self.reply(200,{'message':'Daily Morgan brief saved.' if chat else 'Daily Morgan brief disabled.'})
                 elif self.path=='/api/discord-provision':
-                    guild=str(data.get('guild','')).strip();token=str(data.get('token','')).strip()
+                    guild=str(data.get('guild','')).strip();provided=str(data.get('token','')).strip();cfgp=dotenv_values(ROOT/'.env');token=provided or str(cfgp.get('DISCORD_MORGAN_BOT_TOKEN','')).strip() or str(cfgp.get('DISCORD_BOT_TOKEN','')).strip()
                     layout=DISCORD.provision_workspace(guild,token or None)
                     set_key(str(ROOT/'.env'),'DISCORD_GUILD_ID',layout['guild'],quote_mode='never')
                     set_key(str(ROOT/'.env'),'DISCORD_STAFF_CHANNEL_ID',layout['staff'],quote_mode='never')
@@ -665,6 +590,13 @@ class Handler(BaseHTTPRequestHandler):
                     for name,channel in layout['agents'].items():set_key(str(ROOT/'.env'),'DISCORD_'+name.upper()+'_CHANNEL_ID',channel,quote_mode='never')
                     (ROOT/'.env').chmod(0o600)
                     return self.reply(200,{'message':'Discord staff workspace created: staff floor, requests, daily briefs, projects, and four role channels.','layout':layout})
+                elif self.path=='/api/discord-agent-test':
+                    agent=str(data.get('agent','')).strip().title()
+                    if agent not in {name for name,_,_ in STAFF}:raise ValueError('Unknown agent.')
+                    given=str(data.get('token','') or '').strip()
+                    try:identity=DiscordBridge(ROOT,None,None,scope=agent).check(given or None)
+                    except Exception as error:return self.reply(400,{'error':str(error)})
+                    return self.reply(200,{'message':'Connected to Discord as '+identity['name']+'.'})
                 elif self.path=='/api/discord':
                     token=str(data.get('token','')).strip();guild=str(data.get('guild','')).strip();staff_channel=str(data.get('staffChannel','')).strip();requests_channel=str(data.get('requestsChannel','')).strip();brief_channel=str(data.get('dailyBriefChannel','')).strip();channels=data.get('agentChannels',{});agent_tokens=data.get('agentTokens',{})
                     if not isinstance(channels,dict) or not isinstance(agent_tokens,dict) or set(channels)-{name for name,_,_ in STAFF} or set(agent_tokens)-{name for name,_,_ in STAFF}:raise ValueError('Invalid agent channel settings.')
@@ -681,16 +613,6 @@ class Handler(BaseHTTPRequestHandler):
                     (ROOT/'.env').chmod(0o600)
                     state=DISCORD.state();state.update({'enabled':data.get('enabled') is True,'lastError':''});DISCORD.save(state)
                     return self.reply(200,{'message':'Discord staff workspace saved. Enable Message Content Intent in Discord Developer Portal, then invite the bot to this server.'})
-                elif self.path=='/api/telegram-agent-group':
-                    chat=str(data.get('chat','')).strip()
-                    if chat and not re.fullmatch(r'-?\d{5,20}',chat):raise ValueError('Enter the private Telegram group ID, for example -1001234567890.')
-                    set_key(str(ROOT/'.env'),'TELEGRAM_AGENT_GROUP_CHAT',chat,quote_mode='never')
-                    (ROOT/'.env').chmod(0o600)
-                    return self.reply(200,{'message':'Staff Telegram group saved.' if chat else 'Staff Telegram group disabled.'})
-                elif self.path=='/api/telegram-pair':
-                    state=TELEGRAM.state()
-                    if not state.get('enabled'):return self.reply(409,{'error':'Verify and enable Telegram before creating a pairing code.'})
-                    return self.reply(200,{'code':TELEGRAM.pairing()})
                 elif self.path=='/api/mode':
                     if data.get('mode') not in ('off','draft','send'):raise ValueError()
                     restart=monitor_active() or desired()
@@ -792,9 +714,7 @@ if __name__=='__main__':
     if not DESIRED.exists():set_desired(monitor_active())
     threading.Thread(target=supervise,daemon=True).start()
     print(f'Onyx and Ink dashboard: http://{APP_HOST}:{APP_PORT}')
-    threading.Thread(target=TELEGRAM.run,daemon=True).start()
     threading.Thread(target=DISCORD.run,daemon=True).start()
-    for bridge in TELEGRAM_AGENTS.values():threading.Thread(target=bridge.run,daemon=True).start()
     tls=None if CLOUD_MODE else ACCESS.context();lan=None
     if tls:
         lan=ThreadingHTTPServer(('0.0.0.0',8766),Handler);lan.socket=tls.wrap_socket(lan.socket,server_side=True)

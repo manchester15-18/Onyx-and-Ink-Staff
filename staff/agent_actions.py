@@ -46,12 +46,12 @@ def artifact_mime(suffix):
 CATALOG = '''Actions (use exact names and argument keys):
 report {project:project name optional,title,text}; document {title,text}; word_document {title,text}; pdf {title,text}; spreadsheet {title,values:[[cells]]}; presentation {title,slides:[text]}; print_sheet {title,file_ids:[generated PNG/JPEG IDs]}; drive_search {query}; drive_download {id,name};
 email {to:one address or staff name or all_agents,subject,body,attachments:[file IDs optional]};
-design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; telegram_voice {text} (send a voice message in your own voice to the staff Telegram group); telegram_poll {question,options:[2-10 strings],anonymous:true,allows_multiple_answers:false} (post a Telegram poll to the staff group; votes are recorded for any agent to read); voice_tune {note} (refine your own voice direction; never tune another agent); workspace_files {};
+design {prompt,model:schnell or klein,reference_file_id:optional generated PNG ID for klein edits}; upload {file_id}; share_drive {file_id}; files {}; project_context {}; staff_reports {name:morgan,avery,jordan,cameron,or all}; project_create {name,overview,reason,activate:false}; project_brief_update {project:optional current project,overview,reason}; staff_message {to:Morgan,Avery,Jordan,or Cameron,text,attachments:[generated file IDs optional]}; staff_group_post {text,attachments:[generated file IDs optional]}; discord_voice {text} (send a voice message in your own voice to the Discord staff channel); discord_poll {question,answers:[2-10 options],duration_hours:24} (post a native Discord poll to the staff channel); discord_poll_results {message_id} (read a posted poll's votes); discord_react {message_id,emoji} (react to a Discord message); discord_sticker {name} (send a server sticker by name); voice_tune {note} (refine your own voice direction; never tune another agent); workspace_files {};
 products {query:optional}; product_update {id:optional existing/new product ID,title,description,price,image_file_id:optional uploaded/generated image,status:draft,ready,or published}; square_import_website {url:optional public store URL};
 github_site_files {query:optional}; github_site_read {path}; github_preview_patch {path,find,replace,summary}; github_preview_write {path,content,summary};
 github_main_files {query:optional}; github_main_read {path}; github_main_patch_request {path,find,replace,summary};
 inbox {}; read_email {id}; reply_email {id,body}; delete_email {id} (only when the human says "delete email ID" explicitly; otherwise ask for that command); calendar {}; calendar_event {summary,start,end} (ISO datetimes with offsets, no attendees);
-search {query}; webpage {url}. Always use presentation for any request containing PowerPoint, PPT, PPTX, Google Slides, slides, slide deck, deck, or presentation when the requested result is a multi-slide deliverable; PowerPoint/Slides/Deck are interchangeable and all route to a native Google Slides deck, and the result always includes its filename (ending .pptx, the export format), format, and live Slides link. Every generated artifact result — document, sheet, deck, drawing, PDF, Word, image, audio, or video — must be handed back with its filename including its extension, its format, and its link; never hand back a bare title or id. Use design for a standalone creative image, product asset, mock-up, or visual element. Canva and Figma are connected as secured Codex creative workspaces: describe the requested creative direction in the deck or design prompt, but never claim a Canva or Figma file was created unless a successful receipt provides its link. Workspace creation/upload is automatic. Use staff_message for ordinary agent-to-agent coordination in the configured Discord workspace or Telegram staff group. Email to James (CEO), Jaunee (Vice President), named Onyx & Ink agents, or an address explicitly listed in AUTONOMOUS_EXTERNAL_EMAILS sends automatically; any other outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.
+search {query}; webpage {url}. Always use presentation for any request containing PowerPoint, PPT, PPTX, Google Slides, slides, slide deck, deck, or presentation when the requested result is a multi-slide deliverable; PowerPoint/Slides/Deck are interchangeable and all route to a native Google Slides deck, and the result always includes its filename (ending .pptx, the export format), format, and live Slides link. Every generated artifact result — document, sheet, deck, drawing, PDF, Word, image, audio, or video — must be handed back with its filename including its extension, its format, and its link; never hand back a bare title or id. Use design for a standalone creative image, product asset, mock-up, or visual element. Canva and Figma are connected as secured Codex creative workspaces: describe the requested creative direction in the deck or design prompt, but never claim a Canva or Figma file was created unless a successful receipt provides its link. Workspace creation/upload is automatic. Use staff_message for ordinary agent-to-agent coordination in the configured Discord workspace. Email to James (CEO), Jaunee (Vice President), named Onyx & Ink agents, or an address explicitly listed in AUTONOMOUS_EXTERNAL_EMAILS sends automatically; any other outside address creates a draft awaiting human approval in Outbox. Address James as CEO and Jaunee as Vice President in executive correspondence. Email James only for a blocker, urgent risk, decision, or specific human input needed to finish an assignment. Keep CEO email under 120 words with one clear request; routine progress and completed reports stay in the dashboard. Do not put a sign-off or signature in email bodies; the mail system appends the official agent signature. Reports save into the named project folder; omit project to use the project selected on the Reports page. Document/sheet/presentation require Google Workspace sign-in. Design requires configured Cloudflare. No shell, arbitrary local files, purchases, deletion, or unapproved outside sending.
 Media and storefront additions: doc_read {id}; sheet_read {id,range}; slides_read {id}; drawing_create {title} (creates a real but BLANK Google Drawing — shapes must be added in the Drawings editor, the API cannot draw content); drawing_read {id}; image_create {title,subtitle,format:png|jpg|jpeg|webp|gif|svg} (locally rendered, NOT AI-generated; AI design images are PNG); media_view {file_id} (verifies an existing image/PDF/audio/video file and reports only what it can actually decode); audio_generate {text,format:wav|mp3|aac|flac} (Avery only, real Cloudflare text-to-speech; default wav); video_generate {text} (Avery only — NOT CONFIGURED: no video provider is wired, so it always reports the blocker and creates nothing, never a placeholder); storefront_files {query}; storefront_read {path}; storefront_check {check: foundation, node_syntax, or package_scripts, path: JS file for node_syntax} (Jordan only, read-only allowlisted checks on the live storefront folder); github_preview_plan {path,find,replace,summary} and github_main_plan {path,find,replace,summary} (Jordan only — save a gated change plan in work/storefront-plans/ and stop; nothing is pushed or merged by the agent. Preview auto-publishes on Cloudflare only after James approves and the plan is applied and pushed to preview from the PC with the site deploy key; main merges only through a James-approved preview-to-main pull request, never automatically). product_create {slug,name,category,price_cents,stock_quantity,summary,description:[paragraphs],details:[items],keywords:[tags],image_prompts:[exactly 5 prompts] or image_files:[exactly 5 paths],mode:stage or publish,ceo_approved:true for publish} (Jordan only — stages the site listing patch and, in publish mode with CEO approval and a production Square token, creates the Square production catalog item and sets its stock; price and stock must come from the approved spec and are never invented; without approval or a production token it stages only and touches nothing in Square). square_link_catalog {items:[{slug,stock_quantity,one_of_one:false}],mode:stage or publish,ceo_approved:true for publish} (Jordan only — stages a Square-link backfill for existing catalogue slugs: Square production item + stock + squareId + server-map entry; one_of_one items must carry stock 1 and are labeled 'One of One' and 'sold as is'; without approval or a production token it stages only). No general shell: Jordan's storefront checks run only the allowlisted local checks above.'''
 
 class Actions:
@@ -455,21 +455,7 @@ class Actions:
                     task=enqueue_staff_task(self.root,self.agent,recipient,message,active_project(self.root)[0])
                     result['task_id']=task['id']
                 return result
-            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
-            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
-            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure Discord, or configure the staff Telegram group and this agent’s dedicated bot in Settings.')
-            prefix=('[[ONYX_STAFF target='+recipient+' hops=1]] ') if recipient else ''
-            response=requests.post('https://api.telegram.org/bot'+token+'/sendMessage',json={'chat_id':chat,'text':prefix+message},timeout=30)
-            if not response.ok:raise RuntimeError('Telegram staff group delivery failed.')
-            for path in files:
-                with path.open('rb') as stream:
-                    sent=requests.post('https://api.telegram.org/bot'+token+'/sendDocument',data={'chat_id':chat,'caption':prefix+path.name[:150]},files={'document':(path.name,stream)},timeout=45)
-                if not sent.ok:raise RuntimeError('Telegram delivered the message but could not deliver one attachment.')
-            result={'result':('Telegram message sent to '+recipient if recipient else 'Telegram staff-group message posted')+(' with '+str(len(files))+' file(s).' if files else '.'),'channel':chat}
-            if recipient:
-                task=enqueue_staff_task(self.root,self.agent,recipient,message,active_project(self.root)[0])
-                result['task_id']=task['id']
-            return result
+            raise ValueError('Enable Discord and save its shared bot token in Settings.')
         if action=='square_import_website':
             if self.agent!='Jordan':raise ValueError('Only Jordan manages Square catalog imports.')
             from staff.square_commerce import SquareCommerce
@@ -716,30 +702,65 @@ class Actions:
             if self.agent!='Jordan':raise ValueError('Only Jordan manages Square catalog linking.')
             from staff.square_link import link_existing_products
             return link_existing_products(self.root,a)
-        if action=='telegram_voice':
-            from staff.agent_chat import TelegramBridge
+        if action=='discord_voice':
+            from staff.discord_bridge import DiscordBridge
             from staff.voice import speak, log_voice_send
             cfg=dotenv_values(self.root/'.env')
-            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
-            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
-            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure the staff Telegram group and this agent\u2019s dedicated bot in Settings.')
+            if str(cfg.get('DISCORD_ENABLED','')).lower()!='true' or not (cfg.get('DISCORD_'+self.agent.upper()+'_BOT_TOKEN') or cfg.get('DISCORD_BOT_TOKEN')):
+                raise ValueError('Enable Discord and save a bot token in Settings.')
+            bridge=DiscordBridge(self.root,None,None)
+            channel=bridge.channel()
+            if not bridge.valid_channel(channel):raise ValueError('Set a valid Discord staff channel ID in Settings.')
             voice_text=self.text(a,'text',3000)
             spoken=speak(self.root,self.agent,voice_text)
-            TelegramBridge(self.root,None,None,agent=self.agent).send_voice_to_chat(token,chat,spoken['data'])
-            try:log_voice_send(self.root,self.agent,'group-voice',chat,voice_text,spoken.get('duration_seconds'))
+            mp3=bridge.ogg_to_mp3(spoken['data'])
+            bridge.post_audio(channel,bridge.token(self.agent) or bridge.token(),mp3,self.agent,'**'+self.agent+'**\n'+voice_text[:1900])
+            try:log_voice_send(self.root,self.agent,'discord-group-voice',channel,voice_text,spoken.get('duration_seconds'),provider=spoken.get('provider'))
             except Exception:pass
-            return {'result':'Voice message sent as '+self.agent+' to the staff Telegram group.','channel':chat,'duration_seconds':spoken['duration_seconds'],'provider':spoken['provider']}
-        if action=='telegram_poll':
-            from staff.agent_chat import TelegramBridge
+            return {'result':'Voice message sent as '+self.agent+' to the Discord staff channel.','channel':channel,'duration_seconds':spoken['duration_seconds'],'provider':spoken['provider']}
+        if action=='discord_poll':
+            from staff.discord_bridge import DiscordBridge
             cfg=dotenv_values(self.root/'.env')
-            chat=str(cfg.get('TELEGRAM_AGENT_GROUP_CHAT','')).strip()
-            token=cfg.get('TELEGRAM_'+self.agent.upper()+'_BOT_TOKEN','')
-            if not re.fullmatch(r'-?\d{5,20}',chat) or not token:raise ValueError('Configure the staff Telegram group and this agent\u2019s dedicated bot in Settings.')
-            options=a.get('options',[])
-            if not isinstance(options,list):raise ValueError('Poll options must be a list of 2-10 strings.')
-            sent=TelegramBridge(self.root,None,None,agent=self.agent).send_poll(token,chat,self.text(a,'question',300),options,a.get('anonymous',True) is not False,a.get('allows_multiple_answers',False) is True)
-            poll=(sent.get('poll',{}) if isinstance(sent,dict) else {})
-            return {'result':'Poll sent as '+self.agent+' to the staff Telegram group.','poll_id':str(poll.get('id','')),'question':self.text(a,'question',300)}
+            if str(cfg.get('DISCORD_ENABLED','')).lower()!='true' or not (cfg.get('DISCORD_'+self.agent.upper()+'_BOT_TOKEN') or cfg.get('DISCORD_BOT_TOKEN')):
+                raise ValueError('Enable Discord and save a bot token in Settings.')
+            bridge=DiscordBridge(self.root,None,None)
+            channel=bridge.channel()
+            if not bridge.valid_channel(channel):raise ValueError('Set a valid Discord staff channel ID in Settings.')
+            question=self.text(a,'question',300)
+            answers=[str(x)[:55] for x in (a.get('answers') or []) if str(x).strip()]
+            result=bridge.create_poll(channel,bridge.token(self.agent) or bridge.token(),question,answers,a.get('duration_hours',24))
+            return {'result':'Discord poll posted as '+self.agent+'.','channel':channel,'message_id':str(result.get('id',''))}
+        if action=='discord_poll_results':
+            from staff.discord_bridge import DiscordBridge
+            cfg=dotenv_values(self.root/'.env')
+            if str(cfg.get('DISCORD_ENABLED','')).lower()!='true' or not (cfg.get('DISCORD_'+self.agent.upper()+'_BOT_TOKEN') or cfg.get('DISCORD_BOT_TOKEN')):
+                raise ValueError('Enable Discord and save a bot token in Settings.')
+            bridge=DiscordBridge(self.root,None,None)
+            channel=str(a.get('channel') or bridge.channel())
+            if not bridge.valid_channel(channel):raise ValueError('Set a valid Discord staff channel ID in Settings.')
+            result=bridge.read_poll(channel,str(a.get('message_id','')).strip(),bridge.token(self.agent) or bridge.token())
+            return {'result':'Discord poll results.','channel':channel,**result}
+        if action=='discord_react':
+            from staff.discord_bridge import DiscordBridge
+            cfg=dotenv_values(self.root/'.env')
+            if str(cfg.get('DISCORD_ENABLED','')).lower()!='true' or not (cfg.get('DISCORD_'+self.agent.upper()+'_BOT_TOKEN') or cfg.get('DISCORD_BOT_TOKEN')):
+                raise ValueError('Enable Discord and save a bot token in Settings.')
+            bridge=DiscordBridge(self.root,None,None)
+            channel=str(a.get('channel') or bridge.channel())
+            if not bridge.valid_channel(channel):raise ValueError('Set a valid Discord staff channel ID in Settings.')
+            bridge.react(channel,str(a.get('message_id','')).strip(),self.text(a,'emoji',100),bridge.token(self.agent) or bridge.token())
+            return {'result':'Reaction added as '+self.agent+'.','channel':channel}
+        if action=='discord_sticker':
+            from staff.discord_bridge import DiscordBridge
+            cfg=dotenv_values(self.root/'.env')
+            if str(cfg.get('DISCORD_ENABLED','')).lower()!='true' or not (cfg.get('DISCORD_'+self.agent.upper()+'_BOT_TOKEN') or cfg.get('DISCORD_BOT_TOKEN')):
+                raise ValueError('Enable Discord and save a bot token in Settings.')
+            bridge=DiscordBridge(self.root,None,None)
+            channel=str(a.get('channel') or bridge.channel())
+            guild=str(cfg.get('DISCORD_GUILD_ID','')).strip()
+            if not bridge.valid_channel(channel) or not bridge.valid_channel(guild):raise ValueError('Set a valid Discord staff channel and server ID in Settings.')
+            result=bridge.send_sticker(channel,bridge.token(self.agent) or bridge.token(),guild,self.text(a,'name',100))
+            return {'result':'Sticker sent as '+self.agent+'.','channel':channel,'message_id':str(result.get('id',''))}
         if action=='voice_tune':
             from staff.voice import tune_voice
             tuned=tune_voice(self.root,self.agent,self.text(a,'note',200))

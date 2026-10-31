@@ -50,8 +50,11 @@ TOOL_ALLOWLIST = {
     "square_inventory_set",
     "product_create",
     "square_link_catalog",
-    "telegram_voice",
-    "telegram_poll",
+    "discord_voice",
+    "discord_poll",
+    "discord_poll_results",
+    "discord_react",
+    "discord_sticker",
     "voice_tune",
 }
 
@@ -153,7 +156,7 @@ def _needs_approval(action, args):
     return False
 
 
-_IDENTITY_ACTIONS = {"telegram_voice", "telegram_poll", "voice_tune"}
+_IDENTITY_ACTIONS = {"discord_voice", "discord_poll", "discord_poll_results", "discord_react", "discord_sticker", "voice_tune"}
 
 
 def _execute(root, action, args, run_id, executor, agent="Jordan"):
@@ -299,7 +302,7 @@ def tool_results_context(root, limit=5):
         # Voice sends are log-only: their records stay in tool-task-results
         # and the voice log, and never reach report text where an agent
         # could echo them back into chat or voice.
-        if isinstance(record, dict) and record.get("action") == "telegram_voice":
+        if isinstance(record, dict) and record.get("action") == "discord_voice":
             continue
         lines.append("- [%s] %s: %s" % (record.get("status", "?"), record.get("action", "?"),
                                         str(record.get("summary", ""))[:200]))

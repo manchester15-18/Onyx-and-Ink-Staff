@@ -29,7 +29,7 @@ def update_changelog(changed,base_ref='uncommitted'):
         'dashboard/style.css':'Updated dashboard appearance and responsive layout',
         'dashboard_mail.py':'Updated Gmail inbox access and message handling',
         'inbox_state.py':'Updated dashboard-only inbox cleanup and attachment uploads',
-        'agent_chat.py':'Updated staff chat and Telegram conversations',
+        'agent_chat.py':'Updated staff chat and Discord conversations',
         'agent_actions.py':'Updated staff action capabilities and authorization checks',
         'staff_email.py':'Updated email preparation, attachments, and sending',
         'github_sync.py':'Updated GitHub backup and changelog safeguards',

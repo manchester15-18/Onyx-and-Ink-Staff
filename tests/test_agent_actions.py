@@ -108,14 +108,16 @@ class ActionTests(unittest.TestCase):
    self.assertIn('error',a.execute('staff_reports',{'name':'private'}))
  def test_staff_message_routes_a_targeted_bot_handoff_to_the_staff_group(self):
   with tempfile.TemporaryDirectory() as d:
-   root=Path(d);(root/'.env').write_text('TELEGRAM_AGENT_GROUP_CHAT=-1004450996238\nTELEGRAM_MORGAN_BOT_TOKEN=private-test-token\n')
-   response=Mock(ok=True)
-   with patch('agent_actions.requests.post',return_value=response) as post:
+   root=Path(d);(root/'.env').write_text('DISCORD_ENABLED=true\nDISCORD_BOT_TOKEN=test-token\nDISCORD_CAMERON_CHANNEL_ID=123456789012345678\n')
+   sent={}
+   def fake_send(self,sender,text,files=(),recipient=''):
+    sent.update({'sender':sender,'text':text,'recipient':recipient})
+    return {'result':'Discord private staff message posted','channel':'123456789012345678'}
+   with patch('staff.discord_bridge.DiscordBridge.send',fake_send):
     result=Actions(root,'Morgan','handoff').execute('staff_message',{'to':'Cameron','text':'Review the return policy and report any gaps.'})
-   self.assertIn('sent to Cameron',result['result'])
-   self.assertEqual(post.call_args.args[0],'https://api.telegram.org/botprivate-test-token/sendMessage')
-   self.assertEqual(post.call_args.kwargs['json']['chat_id'],'-1004450996238')
-   self.assertTrue(post.call_args.kwargs['json']['text'].startswith('[[ONYX_STAFF target=Cameron hops=1]]'))
+   self.assertIn('Discord',result['result'])
+   self.assertEqual(sent['recipient'],'Cameron')
+   self.assertIn('return policy',sent['text'])
  def test_allowlisted_external_email_sends_without_an_outbox_review(self):
   with tempfile.TemporaryDirectory() as d:
    root=Path(d);(root/'.env').write_text(CFG+'AUTONOMOUS_EXTERNAL_EMAILS=partner@example.com\n')
@@ -123,17 +125,17 @@ class ActionTests(unittest.TestCase):
    with patch('agent_actions.StaffMail.from_env',return_value=mail) as factory:
     result=Actions(root,'Avery','approved-external').execute('email',{'to':'partner@example.com','subject':'Brief','body':'Attached is the current brief.'})
    factory.assert_called_once_with(root,config=ANY);mail.deliver.assert_called_once();self.assertIn('Sent automatically',result['approval'])
- def test_agents_can_generate_word_and_pdf_files_for_telegram_or_drive_sharing(self):
+ def test_agents_can_generate_word_and_pdf_files_for_drive_sharing(self):
   with tempfile.TemporaryDirectory() as d:
    a=Actions(Path(d),'Avery','files')
    word=a.execute('word_document',{'title':'Campaign brief','text':'Launch details\n• Confirm assets'})
    pdf=a.execute('pdf',{'title':'Campaign brief','text':'Launch details\n• Confirm assets'})
    self.assertEqual(a.file(word['file_id']).suffix,'.docx');self.assertTrue(a.file(word['file_id']).read_bytes().startswith(b'PK'))
    self.assertEqual(a.file(pdf['file_id']).suffix,'.pdf');self.assertTrue(a.file(pdf['file_id']).read_bytes().startswith(b'%PDF'))
- def test_jordan_can_stage_a_product_with_a_telegram_image(self):
+ def test_jordan_can_stage_a_product_with_a_discord_image(self):
   with tempfile.TemporaryDirectory() as d:
    a=Actions(Path(d),'Jordan','catalog')
-   image=a.save('mug.png',b'png-image','.png','telegram-upload')
+   image=a.save('mug.png',b'png-image','.png','discord-upload')
    product=a.execute('product_update',{'title':'Onyx Mug','description':'Black ceramic mug.','price':'18.5','image_file_id':image['file_id'],'status':'published'})
    self.assertEqual(product['status'],'ready');self.assertIn('Square',product['result'])
    self.assertEqual(a.execute('products',{})['products'][0]['title'],'Onyx Mug')

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 from unittest.mock import patch
 from email.message import Message
-from staff.agent_chat import AgentChat, TelegramBridge, concise_reply, telegram_markup
+from staff.agent_chat import AgentChat, concise_reply
 from staff.dashboard_access import Access, setup
 import threading
 import time
@@ -70,15 +70,15 @@ class ChatAccessTests(unittest.TestCase):
             self.assertEqual(chat.ask('Morgan','Plan',request),answer)
             chat.llm.call.assert_called_once()
             self.assertNotIn('test-private-secret',str(chat.history('Morgan')))
-            chat.ask('Morgan','Next step','telegram:42',source='telegram')
-            self.assertEqual(AgentChat(root).history('Morgan')[-1]['source'],'telegram')
+            chat.ask('Morgan','Next step','discord:42',source='discord')
+            self.assertEqual(AgentChat(root).history('Morgan')[-1]['source'],'discord')
             with self.assertRaises(ValueError):chat.history('CEO')
     def test_transient_cloud_error_is_not_sent_back_to_the_model_as_history(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\n')
             chat=AgentChat(root);chat.llm=Mock();chat.llm.call.return_value='Recovered answer.'
             with chat.db() as db:
-                db.execute('INSERT INTO messages(agent,role,body,source) VALUES (?,?,?,?)',('Morgan','assistant','I could not reach a compatible cloud AI service. Please try again.','telegram'))
+                db.execute('INSERT INTO messages(agent,role,body,source) VALUES (?,?,?,?)',('Morgan','assistant','I could not reach a compatible cloud AI service. Please try again.','discord'))
             answer=chat.ask('Morgan','What is next?','12121212-1212-1212-1212-121212121212')
             self.assertEqual(answer,'Recovered answer.')
             sent=chat.llm.call.call_args.args[0]
@@ -153,77 +153,6 @@ class ChatAccessTests(unittest.TestCase):
             self.assertFalse(access.authenticated(handler))
             self.assertIn('192.168.1.40:8765',access.hosts())
             self.assertTrue(access.login('windows-test-password','127.0.0.1'))
-    def test_telegram_pair_code_is_temporary_and_state_defaults_disabled(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);bridge=TelegramBridge(root,AgentChat(root),threading.Event())
-            self.assertFalse(bridge.state()['enabled'])
-            self.assertNotEqual(bridge.pairing(),bridge.pairing())
-
-    def test_telegram_token_rejection_is_actionable_and_never_echoes_token(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event())
-            rejected=Mock(status_code=401,ok=False)
-            with patch('agent_chat.requests.post',return_value=rejected):
-                with self.assertRaisesRegex(RuntimeError,'rejected the bot token') as error:
-                    bridge.api('123:private-token-value','getMe',{})
-            self.assertNotIn('private-token-value',str(error.exception))
-
-    def test_telegram_get_me_returns_safe_bot_identity(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event())
-            response=Mock(status_code=200,ok=True);response.json.return_value={'ok':True,'result':{'username':'onyx_staff_bot'}}
-            with patch('agent_chat.requests.post',return_value=response):
-                self.assertEqual(bridge.api('123:private-token-value','getMe',{}),{'username':'onyx_staff_bot'})
-
-    def test_telegram_command_menu_includes_pairing_and_all_staff(self):
-        commands=TelegramBridge.commands()
-        self.assertEqual([item['command'] for item in commands],['voice','start','pair','morgan','avery','jordan','cameron','help'])
-        self.assertTrue(all(set(item)=={'command','description'} for item in commands))
-
-    def test_telegram_file_download_stays_bounded_and_uses_safe_upload_store(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event())
-            bridge.api=Mock(return_value={'file_path':'documents/brief.pdf'})
-            response=Mock(ok=True,content=b'%PDF-safe-test')
-            message={'document':{'file_id':'file-id','file_size':14,'file_name':'brief.pdf'}}
-            with patch('agent_chat.requests.get',return_value=response):
-                upload=bridge.incoming_file('private-token',message)
-            self.assertEqual(upload['name'],'brief.pdf')
-            self.assertTrue((Path(folder)/'work'/'uploads').exists())
-
-    def test_telegram_rejects_unapproved_attachment_types_before_download(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event())
-            with self.assertRaisesRegex(ValueError,'Supported files'):
-                bridge.incoming_file('private-token',{'document':{'file_id':'file-id','file_size':1,'file_name':'program.exe'}})
-
-    def test_telegram_topic_reply_stays_in_the_same_agent_thread(self):
-        message={'chat':{'id':123},'message_thread_id':456}
-        self.assertEqual(TelegramBridge.topic_key(message),'123:456')
-        self.assertEqual(TelegramBridge.reply_target(message),{'chat_id':123,'message_thread_id':456})
-
-    def test_dedicated_bot_only_accepts_its_name_or_mention_in_a_group(self):
-        bridge=TelegramBridge(Path('.'),Mock(),threading.Event(),'Morgan','TELEGRAM_MORGAN_BOT_TOKEN')
-        bridge.identity={'id':99,'username':'Morgan_COO_OnyxInkBot'}
-        message={'chat':{'type':'supergroup'},'from':{'id':1}}
-        self.assertEqual(bridge.addressed_in_group('token',message,'Morgan, give us the priority.'),(True,'give us the priority.'))
-        self.assertEqual(bridge.addressed_in_group('token',message,'@Morgan_COO_OnyxInkBot give us the priority.'),(True,'give us the priority.'))
-        self.assertEqual(bridge.addressed_in_group('token',message,'Everyone introduce yourselves.'),(False,'Everyone introduce yourselves.'))
-
-    def test_group_follow_up_routes_to_the_last_responding_agent(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event(),'Morgan','TOKEN')
-            bridge.identity={'id':99,'username':'Morgan_COO_OnyxInkBot'}
-            message={'chat':{'type':'supergroup','id':-10012345},'from':{'id':1}}
-            bridge.set_group_focus(message,'Morgan')
-            self.assertEqual(bridge.addressed_in_group('token',message,'Tell Cameron to get on it ASAP.'),(True,'Tell Cameron to get on it ASAP.'))
-    def test_explicit_agent_name_overrides_the_active_group_follow_up_agent(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event(),'Avery','TOKEN')
-            bridge.identity={'id':98,'username':'Avery_Marketing_OnyxInkBot'}
-            message={'chat':{'type':'supergroup','id':-10012345},'from':{'id':1}}
-            bridge.set_group_focus(message,'Avery')
-            self.assertEqual(bridge.addressed_in_group('token',message,'Morgan, is there anything Avery should include?'),(False,'Morgan, is there anything Avery should include?'))
     def test_message_instruction_enters_tool_flow(self):
         self.assertTrue(AgentChat.needs_tools('Tell Cameron to get on the return policy ASAP.'))
 
@@ -231,9 +160,8 @@ class ChatAccessTests(unittest.TestCase):
         self.assertTrue(AgentChat.needs_tools('Look at the Drive files and use them as references.'))
         self.assertTrue(AgentChat.needs_tools('Create two tumbler designs from the Google Drive references.'))
         self.assertTrue(AgentChat.needs_tools('Can Morgan access Drive?'))
-    def test_telegram_replies_remove_heading_syntax_and_keep_basic_formatting(self):
+    def test_replies_remove_heading_syntax_and_keep_basic_formatting(self):
         self.assertEqual(concise_reply('## Next steps\n\n- **Launch**\n\n\nDone'),'Next steps\n\n- **Launch**\n\nDone')
-        self.assertEqual(telegram_markup('## Next\n- **Launch** and *review* __today__'),'Next\n• <b>Launch</b> and <i>review</i> <u>today</u>')
     def test_staff_message_command_dispatches_before_reporting_success(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'.env').write_text('GROQ_API_KEY=test\nAGENT_TOOLS_ENABLED=true\n')
@@ -244,29 +172,5 @@ class ChatAccessTests(unittest.TestCase):
             self.assertEqual(execute.call_args.args[0],'staff_message')
             self.assertEqual(execute.call_args.args[1]['to'],'Cameron')
             self.assertIn('return policy',execute.call_args.args[1]['text'])
-
-    def test_paired_owner_authorizes_other_members_of_that_group(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event(),'Morgan','TELEGRAM_MORGAN_BOT_TOKEN')
-            message={'chat':{'type':'supergroup','id':-10012345}}
-            self.assertFalse(bridge.group_allowed(message))
-            bridge.authorize_group(message,'1486164021')
-            self.assertTrue(bridge.group_allowed(message))
-
-    def test_group_authorization_survives_concurrent_bot_workers(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root=Path(folder);message={'chat':{'type':'supergroup','id':-10012345}}
-            bridges=[TelegramBridge(root,AgentChat(root),threading.Event(),name,'TOKEN') for name in ('Morgan','Avery','Jordan','Cameron')]
-            workers=[threading.Thread(target=bridge.authorize_group,args=(message,'1486164021')) for bridge in bridges]
-            for worker in workers:worker.start()
-            for worker in workers:worker.join()
-            self.assertTrue(bridges[0].group_allowed(message))
-
-    def test_dedicated_telegram_bot_uses_isolated_state_and_agent(self):
-        with tempfile.TemporaryDirectory() as folder:
-            bridge=TelegramBridge(Path(folder),AgentChat(Path(folder)),threading.Event(),'Avery','TELEGRAM_AVERY_BOT_TOKEN')
-            self.assertEqual(bridge.token_key,'TELEGRAM_AVERY_BOT_TOKEN')
-            self.assertEqual(bridge.state_path().name,'telegram-state-avery.json')
-            self.assertEqual(bridge.agent,'Avery')
 
 if __name__=='__main__':unittest.main()
